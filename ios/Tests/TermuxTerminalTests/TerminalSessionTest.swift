@@ -1,8 +1,6 @@
 import XCTest
 @testable import TermuxTerminal
 
-/// iOS-specific tests (no Java counterpart): `TerminalSession` driven by a mock `TerminalBackend`, and checks that
-/// unsupported image sequences (sixel, iTerm inline images) are consumed without corrupting the screen.
 final class TerminalSessionTest: TerminalTestCase {
 
     final class MockBackend: TerminalBackend {
@@ -53,11 +51,9 @@ final class TerminalSessionTest: TerminalTestCase {
         XCTAssertEqual(TerminalEmulator.TERMINAL_CURSOR_STYLE_BAR, session.emulator?.cursorStyle)
         XCTAssertTrue(session.isRunning)
 
-        // Input is forwarded to the backend:
         session.writeCodePoint(prependEscape: true, codePoint: 0x20AC)
         XCTAssertEqual([27, 0xE2, 0x82, 0xAC], backend.written)
 
-        // Output is delivered on the main queue from any thread:
         let textExpectation = expectation(description: "text")
         client.onText = { textExpectation.fulfill() }
         DispatchQueue.global().async {
@@ -86,7 +82,6 @@ final class TerminalSessionTest: TerminalTestCase {
         XCTAssertEqual(1, client.finished)
         XCTAssertEqual("hello\n[Process completed (code 3) - press Enter]", session.emulator?.screen.transcriptText)
 
-        // Writes after exit are dropped:
         backend.written.removeAll()
         session.write("x")
         XCTAssertTrue(backend.written.isEmpty)

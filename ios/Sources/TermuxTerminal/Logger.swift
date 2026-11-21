@@ -1,10 +1,7 @@
 import Foundation
 
-/// Port of `com.termux.terminal.Logger`. Logs go to the `TerminalSessionClient` if set,
-/// otherwise to standard error (in place of Android's `android.util.Log`).
 public enum Logger {
 
-    /// If logs without a client should be printed to standard error.
     public static var printLogsWithoutClient = true
 
     public static func log(_ client: TerminalSessionClient?, _ level: LogLevel, _ tag: String, _ message: String) {

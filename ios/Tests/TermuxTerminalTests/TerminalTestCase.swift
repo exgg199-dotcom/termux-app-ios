@@ -1,16 +1,11 @@
 import XCTest
 @testable import TermuxTerminal
 
-// MARK: - JUnit-style helpers so the Java tests port nearly 1:1.
-
-/// Code point of a (single scalar) character literal, like a Java `'x'` char literal.
 func c(_ s: Unicode.Scalar) -> Int { return Int(s.value) }
 
-/// Java-style string concatenation with numbers.
 func + (lhs: String, rhs: Int) -> String { return lhs + String(rhs) }
 func + (lhs: Int, rhs: String) -> String { return String(lhs) + rhs }
 
-/// Like Java `new String(Character.toChars(codePoint))`.
 func stringFromCodePoint(_ codePoint: Int) -> String {
     return String(Character(Unicode.Scalar(UInt32(codePoint))!))
 }
@@ -74,8 +69,6 @@ class JUnitTestCase: XCTestCase {
     }
 }
 
-// MARK: - Unlabeled call forms used by the Java tests.
-
 extension TerminalEmulator {
     func append(_ buffer: [UInt8], _ length: Int) {
         append(buffer, length: length)
@@ -119,8 +112,6 @@ extension TextStyle {
         return encode(foreColor: foreColor, backColor: backColor, effect: effect)
     }
 }
-
-// MARK: - TerminalTestCase
 
 class TerminalTestCase: JUnitTestCase {
 
@@ -203,7 +194,6 @@ class TerminalTestCase: JUnitTestCase {
 
     @discardableResult
     func withTerminalSized(_ columns: Int, _ rows: Int) -> TerminalTestCase {
-        // The tests aren't currently using the client, so a nil client will suffice.
         mTerminal = TerminalEmulator(output: mOutput, columns: columns, rows: rows, cellWidthPixels: TerminalTestCase.INITIAL_CELL_WIDTH_PIXELS,
                                      cellHeightPixels: TerminalTestCase.INITIAL_CELL_HEIGHT_PIXELS, transcriptRows: rows * 2, client: nil)
         return self
@@ -322,7 +312,6 @@ class TerminalTestCase: JUnitTestCase {
 
     @discardableResult
     func placeCursorAndAssert(_ row: Int, _ col: Int, file: StaticString = #filePath, line: UInt = #line) -> TerminalTestCase {
-        // +1 due to escape sequence being one based.
         enterString("\u{1B}[\(row + 1);\(col + 1)H", file: file, line: line)
         assertCursorAt(row, col, file: file, line: line)
         return self
@@ -338,7 +327,6 @@ class TerminalTestCase: JUnitTestCase {
         return self
     }
 
-    /// For testing only. Encoded style according to `TextStyle`.
     func getStyleAt(_ externalRow: Int, _ column: Int) -> Int64 {
         return mTerminal.screen.getStyleAt(externalRow: externalRow, column: column)
     }

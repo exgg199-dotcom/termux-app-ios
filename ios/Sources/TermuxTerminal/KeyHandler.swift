@@ -1,18 +1,11 @@
 import Foundation
 
-/// Port of `com.termux.terminal.KeyHandler`.
-///
-/// iOS has no Android `KeyEvent` key codes, so the port defines the same numeric `KEYCODE_*` constants as
-/// Android's `android.view.KeyEvent` (e.g. `KEYCODE_DPAD_UP = 19`). The UI maps iOS keys (`UIKeyCommand`,
-/// `UIPress`, extra keys row) onto these codes and calls `getCode(keyCode:keyMode:cursorApp:keypadApplication:)`.
 public enum KeyHandler {
 
     public static let KEYMOD_ALT = 0x80000000
     public static let KEYMOD_CTRL = 0x40000000
     public static let KEYMOD_SHIFT = 0x20000000
     public static let KEYMOD_NUM_LOCK = 0x10000000
-
-    // MARK: - Android KeyEvent key codes (same numeric values as android.view.KeyEvent)
 
     public static let KEYCODE_UNKNOWN = 0
     public static let KEYCODE_SOFT_LEFT = 1
@@ -145,13 +138,11 @@ public enum KeyHandler {
     public static let KEYCODE_NUMPAD_LEFT_PAREN = 162
     public static let KEYCODE_NUMPAD_RIGHT_PAREN = 163
 
-    // terminfo: http://pubs.opengroup.org/onlinepubs/7990989799/xcurses/terminfo.html
-    // termcap: http://man7.org/linux/man-pages/man5/termcap.5.html
     private static let TERMCAP_TO_KEYCODE: [String: Int] = [
         "%i": KEYMOD_SHIFT | KEYCODE_DPAD_RIGHT,
-        "#2": KEYMOD_SHIFT | KEYCODE_MOVE_HOME, // Shifted home
+        "#2": KEYMOD_SHIFT | KEYCODE_MOVE_HOME,
         "#4": KEYMOD_SHIFT | KEYCODE_DPAD_LEFT,
-        "*7": KEYMOD_SHIFT | KEYCODE_MOVE_END, // Shifted end key
+        "*7": KEYMOD_SHIFT | KEYCODE_MOVE_END,
         "k1": KEYCODE_F1,
         "k2": KEYCODE_F2,
         "k3": KEYCODE_F3,
@@ -176,8 +167,8 @@ public enum KeyHandler {
         "FC": KEYMOD_SHIFT | KEYCODE_F10,
         "FD": KEYMOD_SHIFT | KEYCODE_F11,
         "FE": KEYMOD_SHIFT | KEYCODE_F12,
-        "kb": KEYCODE_DEL, // backspace key
-        "kd": KEYCODE_DPAD_DOWN, // terminfo=kcud1, down-arrow key
+        "kb": KEYCODE_DEL,
+        "kd": KEYCODE_DPAD_DOWN,
         "kh": KEYCODE_MOVE_HOME,
         "kl": KEYCODE_DPAD_LEFT,
         "kr": KEYCODE_DPAD_RIGHT,
@@ -186,15 +177,15 @@ public enum KeyHandler {
         "K4": KEYCODE_MOVE_END,
         "K5": KEYCODE_PAGE_DOWN,
         "ku": KEYCODE_DPAD_UP,
-        "kB": KEYMOD_SHIFT | KEYCODE_TAB, // termcap=kB, terminfo=kcbt: Back-tab
-        "kD": KEYCODE_FORWARD_DEL, // terminfo=kdch1, delete-character key
-        "kDN": KEYMOD_SHIFT | KEYCODE_DPAD_DOWN, // non-standard shifted arrow down
-        "kF": KEYMOD_SHIFT | KEYCODE_DPAD_DOWN, // terminfo=kind, scroll-forward key
+        "kB": KEYMOD_SHIFT | KEYCODE_TAB,
+        "kD": KEYCODE_FORWARD_DEL,
+        "kDN": KEYMOD_SHIFT | KEYCODE_DPAD_DOWN,
+        "kF": KEYMOD_SHIFT | KEYCODE_DPAD_DOWN,
         "kI": KEYCODE_INSERT,
         "kP": KEYCODE_PAGE_UP,
         "kN": KEYCODE_PAGE_DOWN,
-        "kR": KEYMOD_SHIFT | KEYCODE_DPAD_UP, // terminfo=kri, scroll-backward key
-        "kUP": KEYMOD_SHIFT | KEYCODE_DPAD_UP, // non-standard shifted up
+        "kR": KEYMOD_SHIFT | KEYCODE_DPAD_UP,
+        "kUP": KEYMOD_SHIFT | KEYCODE_DPAD_UP,
         "@7": KEYCODE_MOVE_END,
         "@8": KEYCODE_NUMPAD_ENTER,
     ]
@@ -238,15 +229,10 @@ public enum KeyHandler {
             return (keyMode == 0) ? (cursorApp ? "\u{1B}OD" : "\u{1B}[D") : transformForModifiers("\u{1B}[1", keyMode, "D")
 
         case KEYCODE_MOVE_HOME:
-            // Note that KEYCODE_HOME is handled by the system and never delivered to applications.
-            // On a Logitech k810 keyboard KEYCODE_MOVE_HOME is sent by FN+LeftArrow.
             return (keyMode == 0) ? (cursorApp ? "\u{1B}OH" : "\u{1B}[H") : transformForModifiers("\u{1B}[1", keyMode, "H")
         case KEYCODE_MOVE_END:
             return (keyMode == 0) ? (cursorApp ? "\u{1B}OF" : "\u{1B}[F") : transformForModifiers("\u{1B}[1", keyMode, "F")
 
-        // An xterm can send function keys F1 to F4 in two modes: vt100 compatible or
-        // not. Because Vim may not know what the xterm is sending, both types of keys
-        // are recognized. The same happens for the <Home> and <End> keys.
         case KEYCODE_F1:
             return (keyMode == 0) ? "\u{1B}OP" : transformForModifiers("\u{1B}[1", keyMode, "P")
         case KEYCODE_F2:
@@ -273,10 +259,9 @@ public enum KeyHandler {
             return transformForModifiers("\u{1B}[24", keyMode, "~")
 
         case KEYCODE_SYSRQ:
-            return "\u{1B}[32~" // Sys Request / Print
-        // Is this Scroll lock? case Cancel: return "\033[33~";
+            return "\u{1B}[32~"
         case KEYCODE_BREAK:
-            return "\u{1B}[34~" // Pause/Break
+            return "\u{1B}[34~"
 
         case KEYCODE_ESCAPE, KEYCODE_BACK:
             return "\u{1B}"
@@ -292,7 +277,6 @@ public enum KeyHandler {
             return transformForModifiers("\u{1B}[6", keyMode, "~")
         case KEYCODE_DEL:
             let prefix = ((keyMode & KEYMOD_ALT) == 0) ? "" : "\u{1B}"
-            // Just do what xterm and gnome-terminal does:
             return prefix + (((keyMode & KEYMOD_CTRL) == 0) ? "\u{7F}" : "\u{08}")
         case KEYCODE_NUM_LOCK:
             if keypadApplication {
@@ -301,11 +285,8 @@ public enum KeyHandler {
                 return nil
             }
         case KEYCODE_SPACE:
-            // If ctrl is not down, return null so that it goes through normal input processing (which may e.g. cause a
-            // combining accent to be written):
             return ((keyMode & KEYMOD_CTRL) == 0) ? nil : "\u{0}"
         case KEYCODE_TAB:
-            // This is back-tab when shifted:
             return (keyMode & KEYMOD_SHIFT) == 0 ? "\t" : "\u{1B}[Z"
         case KEYCODE_ENTER:
             return ((keyMode & KEYMOD_ALT) == 0) ? "\r" : "\u{1B}\r"
@@ -322,7 +303,6 @@ public enum KeyHandler {
             if numLockOn {
                 return keypadApplication ? "\u{1B}On" : "."
             } else {
-                // DELETE
                 return transformForModifiers("\u{1B}[3", keyMode, "~")
             }
         case KEYCODE_NUMPAD_SUBTRACT:
@@ -333,35 +313,30 @@ public enum KeyHandler {
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "p") : "0"
             } else {
-                // INSERT
                 return transformForModifiers("\u{1B}[2", keyMode, "~")
             }
         case KEYCODE_NUMPAD_1:
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "q") : "1"
             } else {
-                // END
                 return (keyMode == 0) ? (cursorApp ? "\u{1B}OF" : "\u{1B}[F") : transformForModifiers("\u{1B}[1", keyMode, "F")
             }
         case KEYCODE_NUMPAD_2:
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "r") : "2"
             } else {
-                // DOWN
                 return (keyMode == 0) ? (cursorApp ? "\u{1B}OB" : "\u{1B}[B") : transformForModifiers("\u{1B}[1", keyMode, "B")
             }
         case KEYCODE_NUMPAD_3:
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "s") : "3"
             } else {
-                // PGDN
                 return "\u{1B}[6~"
             }
         case KEYCODE_NUMPAD_4:
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "t") : "4"
             } else {
-                // LEFT
                 return (keyMode == 0) ? (cursorApp ? "\u{1B}OD" : "\u{1B}[D") : transformForModifiers("\u{1B}[1", keyMode, "D")
             }
         case KEYCODE_NUMPAD_5:
@@ -370,28 +345,24 @@ public enum KeyHandler {
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "v") : "6"
             } else {
-                // RIGHT
                 return (keyMode == 0) ? (cursorApp ? "\u{1B}OC" : "\u{1B}[C") : transformForModifiers("\u{1B}[1", keyMode, "C")
             }
         case KEYCODE_NUMPAD_7:
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "w") : "7"
             } else {
-                // HOME
                 return (keyMode == 0) ? (cursorApp ? "\u{1B}OH" : "\u{1B}[H") : transformForModifiers("\u{1B}[1", keyMode, "H")
             }
         case KEYCODE_NUMPAD_8:
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "x") : "8"
             } else {
-                // UP
                 return (keyMode == 0) ? (cursorApp ? "\u{1B}OA" : "\u{1B}[A") : transformForModifiers("\u{1B}[1", keyMode, "A")
             }
         case KEYCODE_NUMPAD_9:
             if numLockOn {
                 return keypadApplication ? transformForModifiers("\u{1B}O", keyMode, "y") : "9"
             } else {
-                // PGUP
                 return "\u{1B}[5~"
             }
         case KEYCODE_NUMPAD_EQUALS:

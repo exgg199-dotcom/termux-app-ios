@@ -1,7 +1,6 @@
 import XCTest
 @testable import TermuxTerminal
 
-
 final class TextStyleTest: JUnitTestCase {
 
 	private static let ALL_EFFECTS = [0, TextStyle.CHARACTER_ATTRIBUTE_BOLD, TextStyle.CHARACTER_ATTRIBUTE_ITALIC,
@@ -36,7 +35,6 @@ final class TextStyleTest: JUnitTestCase {
 			}
 		}
 	}
-
 
 	func testEncodingCombinations() {
 		for f1 in Self.ALL_EFFECTS {

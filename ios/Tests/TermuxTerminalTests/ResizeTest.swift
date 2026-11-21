@@ -14,17 +14,14 @@ final class ResizeTest: TerminalTestCase {
 		let rows = 3, cols = 3;
 		withTerminalSized(cols, rows).enterString("a\r\ndef$").assertLinesAre("a  ", "def", "$  ").assertCursorAt(2, 1);
 
-		// Resize and back again while in main buffer:
 		resize(cols, 5).assertLinesAre("a  ", "def", "$  ", "   ", "   ").assertCursorAt(2, 1);
 		resize(cols, rows).assertLinesAre("a  ", "def", "$  ").assertCursorAt(2, 1);
 
-		// Switch to alt buffer:
 		enterString("\u{1B}[?1049h").assertLinesAre("   ", "   ", "   ").assertCursorAt(2, 1);
 		enterString("h").assertLinesAre("   ", "   ", " h ").assertCursorAt(2, 2);
 
 		resize(cols, 5).resize(cols, rows);
 
-		// Switch from alt buffer:
 		enterString("\u{1B}[?1049l").assertLinesAre("a  ", "def", "$  ").assertCursorAt(2, 1);
 	}
 
@@ -43,15 +40,12 @@ final class ResizeTest: TerminalTestCase {
 		enterString("a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n").assertLinesAre("e  ", "f  ", "   ").assertCursorAt(2, 0);
 		assertLineWraps(false, false, false);
 
-		// Switch to alt buffer:
 		enterString("\u{1B}[?1049h").assertLinesAre("   ", "   ", "   ").assertCursorAt(2, 0);
 		enterString("h").assertLinesAre("   ", "   ", "h  ").assertCursorAt(2, 1);
 
-		// Grow by two rows:
 		resize(cols, 5).assertLinesAre("   ", "   ", "h  ", "   ", "   ").assertCursorAt(2, 1);
 		resize(cols, rows).assertLinesAre("   ", "   ", "h  ").assertCursorAt(2, 1);
 
-		// Switch from alt buffer:
 		enterString("\u{1B}[?1049l").assertLinesAre("e  ", "f  ", "   ").assertCursorAt(2, 0);
 	}
 
@@ -85,11 +79,8 @@ final class ResizeTest: TerminalTestCase {
 		let cols = 3;
 
 		withTerminalSized(cols, rows);
-		// Foreground color to 119:
 		enterString("\u{1B}[38;5;119m");
-		// Background color to 129:
 		enterString("\u{1B}[48;5;129m");
-		// Clear with ED, Erase in Display:
 		enterString("\u{1B}[2J");
 		for r in 0..<rows {
 			for c in 0..<cols {
@@ -102,7 +93,6 @@ final class ResizeTest: TerminalTestCase {
 		assertLinesAre("11 ", "22 ", "   ", "   ", "   ").assertLineWraps(false, false, false, false, false);
 		resize(cols, rows - 2).assertLinesAre("11 ", "22 ", "   ");
 
-		// After resize, screen should still be same color:
 		for r in 0..<rows - 2 {
 			for c in 0..<cols {
 				let style = getStyleAt(r, c);
@@ -111,7 +101,6 @@ final class ResizeTest: TerminalTestCase {
 			}
 		}
 
-		// Background color to 200 and grow back size (which should be cleared to the new background color):
 		enterString("\u{1B}[48;5;200m");
 		resize(cols, rows);
 		for r in 0..<rows {
@@ -128,10 +117,7 @@ final class ResizeTest: TerminalTestCase {
 		let cols = 5;
 
 		withTerminalSized(cols, rows);
-		// Background color to 129:
-		// enterString("\033[48;5;129m").assertLinesAre(" ", " ", " ", " ", " ");
 		enterString("1111\r\n2222\r\n3333\r\n4444\r\n5555").assertCursorAt(4, 4);
-		// assertEquals(129, TextStyle.decodeBackColor(getStyleAt(2, 2)));
 		assertLinesAre("1111 ", "2222 ", "3333 ", "4444 ", "5555 ").assertLineWraps(false, false, false, false, false);
 		resize(cols + 2, rows).assertLinesAre("1111   ", "2222   ", "3333   ", "4444   ", "5555   ").assertCursorAt(4, 4);
 		assertLineWraps(false, false, false, false, false);
@@ -141,7 +127,6 @@ final class ResizeTest: TerminalTestCase {
 		assertLineWraps(false, false, false, true, false);
 		resize(cols - 2, rows).assertLinesAre("3  ", "444", "4  ", "555", "5  ").assertCursorAt(4, 1);
 		assertLineWraps(false, true, false, true, false);
-		// Back to original size:
 		resize(cols, rows).assertLinesAre("1111 ", "2222 ", "3333 ", "4444 ", "5555 ").assertCursorAt(4, 4);
 		assertLineWraps(false, false, false, false, false);
 	}
@@ -174,7 +159,6 @@ final class ResizeTest: TerminalTestCase {
 		withTerminalSized(3, 3).enterString("ABC\u{302}DEF").assertLinesAre("ABC\u{302}", "DEF", "   ");
 		resize(4, 3).assertLinesAre("ABC\u{302}D", "EF  ", "    ");
 
-		// Same as above but with colors:
 		withTerminalSized(3, 3).enterString("\u{1B}[37mA\u{1B}[35mB\u{1B}[33mC\u{302}\u{1B}[32mD\u{1B}[31mE\u{1B}[34mF").assertLinesAre("ABC\u{302}",
 				"DEF", "   ");
 		resize(4, 3).assertLinesAre("ABC\u{302}D", "EF  ", "    ");

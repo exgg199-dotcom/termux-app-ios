@@ -1,7 +1,5 @@
 import Foundation
 
-/// Helpers mirroring `java.lang.Character` UTF-16 functions, since the port keeps Java's
-/// UTF-16 (`char[]`) text storage as `[UInt16]`.
 enum UTF16Util {
     static let MIN_SUPPLEMENTARY_CODE_POINT = 0x10000
 
@@ -21,7 +19,6 @@ enum UTF16Util {
         return codePoint >= MIN_SUPPLEMENTARY_CODE_POINT ? 2 : 1
     }
 
-    /// Like `Character.toChars(codePoint, dst, dstIndex)`.
     @inline(__always) static func toChars(_ codePoint: Int, _ dst: inout [UInt16], _ index: Int) {
         if codePoint >= MIN_SUPPLEMENTARY_CODE_POINT {
             let cp = codePoint - 0x10000
@@ -32,7 +29,6 @@ enum UTF16Util {
         }
     }
 
-    /// Append a code point to a UTF-16 buffer, like `StringBuilder.appendCodePoint()`.
     @inline(__always) static func appendCodePoint(_ codePoint: Int, to dst: inout [UInt16]) {
         if codePoint >= MIN_SUPPLEMENTARY_CODE_POINT {
             let cp = codePoint - 0x10000
@@ -55,8 +51,6 @@ enum UTF16Util {
         return Array(string.utf16)
     }
 
-    /// Whether the code point is unassigned or a surrogate, like the Java
-    /// `Character.getType(cp) == UNASSIGNED || SURROGATE` check.
     static func isUnassignedOrSurrogate(_ codePoint: Int) -> Bool {
         guard let scalar = Unicode.Scalar(UInt32(truncatingIfNeeded: codePoint)) else { return true }
         return scalar.properties.generalCategory == .unassigned
