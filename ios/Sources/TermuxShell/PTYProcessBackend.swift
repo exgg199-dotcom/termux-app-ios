@@ -162,15 +162,13 @@ public final class PTYProcessBackend: TerminalBackend {
 
     static func createSubprocess(executable: String, arguments: [String], environment: [String], workingDirectory: String,
                                  rows: Int, columns: Int, cellWidth: Int, cellHeight: Int) throws -> (Int32, Int32) {
-        let ptm = posix_openpt(O_RDWR | O_NOCTTY)
+        let ptm = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC)
         guard ptm >= 0 else { throw SpawnError(message: "Cannot open /dev/ptmx", code: errno) }
-        _ = fcntl(ptm, F_SETFD, FD_CLOEXEC)
-        guard grantpt(ptm) == 0, unlockpt(ptm) == 0, let namePtr = ptsname(ptm) else {
+        guard let devname = PTYFunctions.slaveName(ptm) else {
             let e = errno
             close(ptm)
-            throw SpawnError(message: "Cannot grantpt()/unlockpt()/ptsname() on /dev/ptmx", code: e)
+            throw SpawnError(message: "Cannot grantpt()/unlockpt()/ptsname_r() on /dev/ptmx", code: e)
         }
-        let devname = String(cString: namePtr)
 
         // Enable UTF-8 mode and disable flow control to prevent Ctrl+S from locking up the display.
         var tios = termios()
@@ -209,7 +207,7 @@ public final class PTYProcessBackend: TerminalBackend {
         sigfillset(&allSignals)
         posix_spawnattr_setsigmask(&attr, &noSignals)
         posix_spawnattr_setsigdefault(&attr, &allSignals)
-        let flags = Int32(POSIX_SPAWN_SETSID) | Int32(POSIX_SPAWN_SETSIGMASK) | Int32(POSIX_SPAWN_SETSIGDEF)
+        let flags = PTYFunctions.spawnSetSID | Int32(POSIX_SPAWN_SETSIGMASK) | Int32(POSIX_SPAWN_SETSIGDEF)
         posix_spawnattr_setflags(&attr, Int16(truncatingIfNeeded: flags))
 
         let argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
@@ -226,6 +224,33 @@ public final class PTYProcessBackend: TerminalBackend {
         }
         return (ptm, childPid)
     }
+}
+
+/// grantpt/unlockpt/ptsname_r are hidden behind feature-test macros in Swift's Glibc module,
+/// so they are looked up dynamically there.
+private enum PTYFunctions {
+    #if canImport(Glibc)
+    static let spawnSetSID: Int32 = 0x80 // POSIX_SPAWN_SETSID in glibc >= 2.26
+    private typealias IntFn = @convention(c) (Int32) -> Int32
+    private typealias PtsnameR = @convention(c) (Int32, UnsafeMutablePointer<CChar>?, Int) -> Int32
+    private static func symbol<T>(_ name: String, as: T.Type) -> T? {
+        guard let p = dlsym(nil, name) else { return nil }
+        return unsafeBitCast(p, to: T.self)
+    }
+    static func slaveName(_ fd: Int32) -> String? {
+        guard let grant = symbol("grantpt", as: IntFn.self), let unlock = symbol("unlockpt", as: IntFn.self),
+              let ptsnameR = symbol("ptsname_r", as: PtsnameR.self) else { return nil }
+        var buf = [CChar](repeating: 0, count: 64)
+        guard grant(fd) == 0, unlock(fd) == 0, ptsnameR(fd, &buf, buf.count) == 0 else { return nil }
+        return String(cString: buf)
+    }
+    #else
+    static let spawnSetSID = Int32(POSIX_SPAWN_SETSID)
+    static func slaveName(_ fd: Int32) -> String? {
+        guard grantpt(fd) == 0, unlockpt(fd) == 0, let p = ptsname(fd) else { return nil }
+        return String(cString: p)
+    }
+    #endif
 }
 
 /// Avoids name clashes between the libc functions and methods of the backend.

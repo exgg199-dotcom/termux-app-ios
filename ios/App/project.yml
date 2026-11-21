@@ -1,0 +1,130 @@
+# XcodeGen project for the Termux iOS app.
+#   brew install xcodegen
+#   cd ios/App && xcodegen generate   # -> TermuxIOS.xcodeproj
+name: TermuxIOS
+
+options:
+  bundleIdPrefix: com.termux
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  # The Swift package in ios/ (Package.swift) with the TermuxTerminal and TermuxShell libraries.
+  TermuxIOS:
+    path: ..
+
+targets:
+  Termux:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources
+      - path: Resources
+    dependencies:
+      - package: TermuxIOS
+        product: TermuxTerminal
+      - package: TermuxIOS
+        product: TermuxShell
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Termux
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        # Expose Documents (with the "home" directory) in the Files app and iTunes file sharing.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIViewControllerBasedStatusBarAppearance: true
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_NAME: Termux
+        PRODUCT_MODULE_NAME: Termux
+        PRODUCT_BUNDLE_IDENTIFIER: com.termux.ios
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        # Set your team to run on a device (Xcode > Signing & Capabilities), or pass
+        # DEVELOPMENT_TEAM=XXXXXXXXXX to xcodebuild.
+        DEVELOPMENT_TEAM: ""
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
+
+  # Pure logic tests (no host app): extra keys parsing, properties parsing, key mapping, cell
+  # metrics and selection math. These source files are UIKit-free and compiled into the bundle.
+  TermuxAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Tests/TermuxAppTests
+      - path: Sources/ExtraKeys/ExtraKeysConstants.swift
+      - path: Sources/ExtraKeys/ExtraKeysInfo.swift
+      - path: Sources/ExtraKeys/SpecialButton.swift
+      - path: Sources/TerminalView/KeyCodes.swift
+      - path: Sources/TerminalView/TerminalInput.swift
+      - path: Sources/TerminalView/TerminalMetrics.swift
+      - path: Sources/TerminalView/TerminalSelection.swift
+      - path: Sources/Settings/TermuxProperties.swift
+      - path: Sources/Settings/AppPreferences.swift
+      - path: Sources/App/Bootstrap.swift
+    dependencies:
+      - package: TermuxIOS
+        product: TermuxTerminal
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.termux.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+
+schemes:
+  Termux:
+    build:
+      targets:
+        Termux: all
+        TermuxAppTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - TermuxAppTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
