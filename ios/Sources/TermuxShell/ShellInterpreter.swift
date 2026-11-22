@@ -36,7 +36,7 @@ public final class ShellInterpreter {
         self.homeDirectory = home
         self.registry = registry
         self.history = history ?? ShellHistory(file: nil)
-        var env: [String: String] = [
+        var initialEnvironment: [String: String] = [
             "HOME": home,
             "PWD": home,
             "PATH": home + "/bin",
@@ -49,8 +49,8 @@ public final class ShellInterpreter {
             "TMPDIR": ShellPath.normalize(NSTemporaryDirectory()),
             "HOSTNAME": SystemInfo.hostName,
         ]
-        for (k, v) in environment { env[k] = v }
-        _environment = env
+        for (k, v) in environment { initialEnvironment[k] = v }
+        _environment = initialEnvironment
         let cwd = environment["PWD"].map { ShellPath.normalize($0) } ?? home
         _currentDirectory = cwd
         _environment["PWD"] = cwd
@@ -237,24 +237,24 @@ public final class ShellInterpreter {
             for (k, v) in assignments { setVariable(k, v) }
             return lastStatus
         }
-        var env = environment
-        for (k, v) in assignments { env[k] = v }
-        let status = runCommand(argv, io: rio, cancellation: cancellation, environment: env)
+        var commandEnvironment = environment
+        for (k, v) in assignments { commandEnvironment[k] = v }
+        let status = runCommand(argv, io: rio, cancellation: cancellation, environment: commandEnvironment)
         rio.stdout.flush()
         lastStatus = status
         return status
     }
 
     /// Runs a command by argument vector (used by `env`, `xargs`-like commands and the interpreter itself).
-    public func runCommand(_ argv: [String], io: ShellIO, cancellation: CancellationToken, environment env: [String: String]? = nil) -> Int32 {
+    public func runCommand(_ argv: [String], io: ShellIO, cancellation: CancellationToken, environment overrides: [String: String]? = nil) -> Int32 {
         guard let name = argv.first else { return 0 }
-        let env = env ?? environment
+        let commandEnvironment = overrides ?? environment
         if let command = registry.command(named: name) {
-            let ctx = CommandContext(arguments: argv, stdin: io.stdin, stdout: io.stdout, stderr: io.stderr, shell: self,
-                                     cancellation: cancellation, environment: env, currentDirectory: currentDirectory)
+            let ctx = CommandContext(argumentVector: argv, stdin: io.stdin, stdout: io.stdout, stderr: io.stderr, shell: self,
+                                     cancellation: cancellation, environment: commandEnvironment, currentDirectory: currentDirectory)
             return command.run(ctx)
         }
-        if let script = findScript(name, environment: env) {
+        if let script = findScript(name, environment: commandEnvironment) {
             return runScript(script, argv: argv, io: io, cancellation: cancellation)
         }
         if name.contains("/") {
@@ -272,7 +272,7 @@ public final class ShellInterpreter {
     }
 
     /// Finds a shell script: a path containing "/" or a file in $PATH.
-    public func findScript(_ name: String, environment env: [String: String]? = nil) -> String? {
+    public func findScript(_ name: String, environment overrides: [String: String]? = nil) -> String? {
         let fm = FileManager.default
         func ok(_ p: String) -> Bool {
             var isDir: ObjCBool = false
@@ -283,7 +283,7 @@ public final class ShellInterpreter {
             guard ok(full), let info = FileInfo(path: full, follow: true), info.isExecutable || name.hasSuffix(".sh") else { return nil }
             return full
         }
-        let path = (env ?? environment)["PATH"] ?? ""
+        let path = (overrides ?? environment)["PATH"] ?? ""
         for dir in path.split(separator: ":") {
             let full = ShellPath.resolve(name, relativeTo: ShellPath.resolve(String(dir), relativeTo: currentDirectory))
             if ok(full) { return full }

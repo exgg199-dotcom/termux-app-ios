@@ -151,7 +151,8 @@ final class ShellInterpreterTests: ShellTestCase {
     }
 
     func testAliases() {
-        XCTAssertEqual(out("alias hi='echo hello'; hi there"), "hello there\n")
+        run("alias hi='echo hello'")
+        XCTAssertEqual(out("hi there"), "hello there\n")
         XCTAssertEqual(out("alias"), "alias hi='echo hello'\n")
         XCTAssertEqual(out("unalias hi; alias"), "")
     }

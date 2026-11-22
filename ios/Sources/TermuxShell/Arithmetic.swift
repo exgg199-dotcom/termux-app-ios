@@ -29,7 +29,7 @@ struct ArithmeticEvaluator {
         var out: [Tok] = []
         let c = Array(s)
         var i = 0
-        let ops = ["<<=", ">>=", "**", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "++", "--",
+        let symbols = ["<<=", ">>=", "**", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "++", "--",
                    "+", "-", "*", "/", "%", "(", ")", "<", ">", "!", "~", "&", "|", "^", "?", ":", "="]
         while i < c.count {
             if c[i].isWhitespace { i += 1; continue }
@@ -50,7 +50,7 @@ struct ArithmeticEvaluator {
                 out.append(.name(String(c[i..<j]))); i = j; continue
             }
             var matched = false
-            for op in ops {
+            for op in symbols {
                 let oc = Array(op)
                 if i + oc.count <= c.count && Array(c[i..<(i + oc.count)]) == oc {
                     out.append(.op(op)); i += oc.count; matched = true; break

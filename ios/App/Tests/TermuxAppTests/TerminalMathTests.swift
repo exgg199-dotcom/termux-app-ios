@@ -1,16 +1,17 @@
 import XCTest
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 final class TerminalMetricsTests: XCTestCase {
-
     private let metrics = TerminalCellMetrics(cellWidth: 7.5, lineHeight: 15, ascent: 11, descent: 3)
 
     func testFromFont() {
-        let m = TerminalCellMetrics.fromFont(advance: 7.2, ascent: 11.4, descent: 2.9, leading: 0.2)
-        XCTAssertEqual(m.lineHeight, 15) // ceil(14.5)
-        XCTAssertEqual(m.cellWidth, 7.2, accuracy: 0.0001)
-        XCTAssertGreaterThanOrEqual(m.baselineOffset, m.ascent)
-        XCTAssertLessThanOrEqual(m.baselineOffset + m.descent, m.lineHeight)
+        let fontMetrics = TerminalCellMetrics.fromFont(advance: 7.2, ascent: 11.4, descent: 2.9, leading: 0.2)
+        XCTAssertEqual(fontMetrics.lineHeight, 15)
+        XCTAssertEqual(fontMetrics.cellWidth, 7.2, accuracy: 0.0001)
+        XCTAssertGreaterThanOrEqual(fontMetrics.baselineOffset, fontMetrics.ascent)
+        XCTAssertLessThanOrEqual(fontMetrics.baselineOffset + fontMetrics.descent, fontMetrics.lineHeight)
     }
 
     func testGridSize() {
@@ -46,7 +47,6 @@ final class TerminalMetricsTests: XCTestCase {
 }
 
 final class TerminalScrollMathTests: XCTestCase {
-
     func testScrollsToBottomOnOutput() {
         let result = TerminalScrollMath.onScreenUpdated(topRow: -10, rowsInHistory: 100, scrollCounter: 1,
                                                         isSelectingText: false, isAutoScrollDisabled: false)
@@ -95,28 +95,27 @@ final class TerminalScrollMathTests: XCTestCase {
     }
 
     func testRowsForScroll() {
-        var r = TerminalScrollMath.rowsForScroll(distanceY: 20, remainder: 0, lineHeight: 15)
-        XCTAssertEqual(r.rows, 1)
-        XCTAssertEqual(r.remainder, 5, accuracy: 0.001)
-        r = TerminalScrollMath.rowsForScroll(distanceY: 10, remainder: r.remainder, lineHeight: 15)
-        XCTAssertEqual(r.rows, 1)
-        XCTAssertEqual(r.remainder, 0, accuracy: 0.001)
-        r = TerminalScrollMath.rowsForScroll(distanceY: -31, remainder: 0, lineHeight: 15)
-        XCTAssertEqual(r.rows, -2)
-        XCTAssertEqual(r.remainder, -1, accuracy: 0.001)
+        var result = TerminalScrollMath.rowsForScroll(distanceY: 20, remainder: 0, lineHeight: 15)
+        XCTAssertEqual(result.rows, 1)
+        XCTAssertEqual(result.remainder, 5, accuracy: 0.001)
+        result = TerminalScrollMath.rowsForScroll(distanceY: 10, remainder: result.remainder, lineHeight: 15)
+        XCTAssertEqual(result.rows, 1)
+        XCTAssertEqual(result.remainder, 0, accuracy: 0.001)
+        result = TerminalScrollMath.rowsForScroll(distanceY: -31, remainder: 0, lineHeight: 15)
+        XCTAssertEqual(result.rows, -2)
+        XCTAssertEqual(result.remainder, -1, accuracy: 0.001)
     }
 
     func testFlingDecay() {
-        let v = TerminalScrollMath.decayedVelocity(1000, dt: 1.0 / 60.0)
-        XCTAssertLessThan(v, 1000)
-        XCTAssertGreaterThan(v, 960)
-        XCTAssertEqual(TerminalScrollMath.decayedVelocity(1000, dt: 0), 1000, accuracy: 0.001)
+        let velocity = TerminalScrollMath.decayedVelocity(1000, elapsed: 1.0 / 60.0)
+        XCTAssertLessThan(velocity, 1000)
+        XCTAssertGreaterThan(velocity, 960)
+        XCTAssertEqual(TerminalScrollMath.decayedVelocity(1000, elapsed: 0), 1000, accuracy: 0.001)
     }
 }
 
-/// A fake screen of fixed lines for the selection tests (rows 0..<lines.count, no transcript).
 private struct FakeText: TerminalSelectionTextSource {
-    let lines: [[String]] // cells per row, "" for the right half of wide characters
+    let lines: [[String]]
 
     func selectionText(x1: Int, y1: Int, x2: Int, y2: Int) -> String {
         var result = ""
@@ -137,14 +136,11 @@ private struct FakeText: TerminalSelectionTextSource {
 }
 
 final class TerminalSelectionTests: XCTestCase {
-
-    private func cells(_ s: String) -> [String] {
-        return s.map { $0 == " " ? " " : String($0) }
+    private func cells(_ string: String) -> [String] {
+        return string.map { $0 == " " ? " " : String($0) }
     }
 
     func testInitialExpandsToWord() {
-        // getSelectedText returns "" for cells outside the word in Termux only for trailing space;
-        // the fake returns the cell content, and word boundaries are spaces mapped to "".
         let line = "ls -la /home".map { $0 == " " ? "" : String($0) }
         let text = FakeText(lines: [line])
         let selection = TerminalSelection.initial(column: 4, row: 0, columns: line.count, text: text)
@@ -163,21 +159,18 @@ final class TerminalSelectionTests: XCTestCase {
     func testUpdateClampsAndKeepsOrder() {
         let text = FakeText(lines: Array(repeating: cells("abcdefghij"), count: 5))
         var selection = TerminalSelection(x1: 2, y1: 1, x2: 5, y2: 3)
-        // Moving the start below the end clamps it to the end row.
         var topRow = selection.update(handle: .start, column: 8, row: 4, rows: 5, activeRows: 5,
                                       isAlternateBufferActive: false, topRow: 0, text: text)
         XCTAssertEqual(selection.y1, 3)
         XCTAssertEqual(selection.x1, 5)
         XCTAssertEqual(topRow, 0)
 
-        // Moving the end above the start clamps it.
         selection = TerminalSelection(x1: 2, y1: 1, x2: 5, y2: 3)
         topRow = selection.update(handle: .end, column: 0, row: 0, rows: 5, activeRows: 5,
                                   isAlternateBufferActive: false, topRow: 0, text: text)
         XCTAssertEqual(selection.y2, 1)
         XCTAssertEqual(selection.x2, 2)
 
-        // Rows are clamped to the screen.
         selection = TerminalSelection(x1: 0, y1: 0, x2: 1, y2: 0)
         _ = selection.update(handle: .end, column: 3, row: 10, rows: 5, activeRows: 5,
                              isAlternateBufferActive: false, topRow: 0, text: text)
@@ -187,12 +180,10 @@ final class TerminalSelectionTests: XCTestCase {
     func testUpdateAutoScrollsIntoTranscript() {
         let text = FakeText(lines: [])
         var selection = TerminalSelection(x1: 0, y1: 0, x2: 3, y2: 2)
-        // 10 transcript rows (activeRows 15 - rows 5), dragging the start to the top row scrolls up.
         let topRow = selection.update(handle: .start, column: 0, row: -2, rows: 5, activeRows: 15,
                                       isAlternateBufferActive: false, topRow: -2, text: text)
         XCTAssertEqual(topRow, -3)
         XCTAssertEqual(selection.y1, -2)
-        // No auto scroll on the alternate buffer.
         var alt = TerminalSelection(x1: 0, y1: 0, x2: 3, y2: 2)
         let altTop = alt.update(handle: .start, column: 0, row: 0, rows: 5, activeRows: 5,
                                 isAlternateBufferActive: true, topRow: 0, text: text)
@@ -200,16 +191,15 @@ final class TerminalSelectionTests: XCTestCase {
     }
 
     func testValidCursorXSnapsWideCharacters() {
-        // "a中b": '中' is wide (columns 1-2), getSelectedText returns it once.
         struct WideText: TerminalSelectionTextSource {
             func selectionText(x1: Int, y1: Int, x2: Int, y2: Int) -> String {
                 let full = ["a", "中", "", "b"]
                 return full[x1...min(x2, 3)].joined()
             }
         }
-        XCTAssertEqual(TerminalSelection.validCursorX(text: WideText(), cy: 0, cx: 2), 3)
-        XCTAssertEqual(TerminalSelection.validCursorX(text: WideText(), cy: 0, cx: 1), 1)
-        XCTAssertEqual(TerminalSelection.validCursorX(text: WideText(), cy: 0, cx: 3), 3)
+        XCTAssertEqual(TerminalSelection.validCursorX(text: WideText(), row: 0, column: 2), 3)
+        XCTAssertEqual(TerminalSelection.validCursorX(text: WideText(), row: 0, column: 1), 1)
+        XCTAssertEqual(TerminalSelection.validCursorX(text: WideText(), row: 0, column: 3), 3)
     }
 
     func testDecrementY() {

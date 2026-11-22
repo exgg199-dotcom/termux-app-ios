@@ -1,33 +1,27 @@
 import Foundation
+import Combine
 import TermuxTerminal
 
-/// Global app state: paths, preferences, the parsed `termux.properties`, colors, font and the
-/// session manager. Plays the role of `TermuxApplication` + the settings parts of `TermuxActivity`.
-final class TermuxEnvironment {
-
+final class TermuxEnvironment: ObservableObject {
     static let shared = TermuxEnvironment()
 
-    /// Posted on the main queue after the settings were (re)loaded or a preference changed.
     static let settingsDidChangeNotification = Notification.Name("TermuxSettingsDidChange")
 
-    /// Post this notification (on any queue) to reload the settings, e.g. from a
-    /// `termux-reload-settings` shell builtin. Port of the `RELOAD_STYLE` broadcast.
     static let reloadSettingsNotification = Notification.Name("com.termux.app.reload_style")
 
     let paths: TermuxPaths
     let preferences: AppPreferences
-    private(set) var properties = TermuxProperties()
+    @Published private(set) var properties = TermuxProperties()
+    @Published private(set) var settingsRevision = 0
     private(set) var extraKeysInfo: ExtraKeysInfo?
-    /// An error loading the extra keys that should be shown to the user.
     private(set) var extraKeysError: String?
-    /// Contents of `~/.termux/font.ttf`, if any.
     private(set) var customFontData: Data?
-    /// An error during bootstrap, shown in the first session.
     private(set) var bootstrapError: String?
 
     private(set) lazy var sessionManager = SessionManager(environment: self)
 
     private var watcher: SettingsWatcher?
+    private var reloadObserver: NSObjectProtocol?
     private var didBootstrap = false
 
     init(paths: TermuxPaths = .appDefault(), preferences: AppPreferences = AppPreferences()) {
@@ -35,18 +29,19 @@ final class TermuxEnvironment {
         self.preferences = preferences
     }
 
-    /// First launch setup and initial settings load. Safe to call multiple times.
     func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
         do {
             try Bootstrap.run(paths: paths)
         } catch {
-            bootstrapError = "Failed to set up the home directory: \(error.localizedDescription)"
-            NSLog("Termux: %@", bootstrapError ?? "")
+            let message = "Failed to set up the home directory: \(error.localizedDescription)"
+            bootstrapError = message
+            NSLog("Termux: %@", message)
         }
 
-        NotificationCenter.default.addObserver(forName: TermuxEnvironment.reloadSettingsNotification, object: nil, queue: .main) { [weak self] _ in
+        reloadObserver = NotificationCenter.default.addObserver(
+            forName: TermuxEnvironment.reloadSettingsNotification, object: nil, queue: .main) { [weak self] _ in
             self?.reloadSettings()
         }
 
@@ -56,19 +51,16 @@ final class TermuxEnvironment {
         reloadSettings()
     }
 
-    /// Reload termux.properties, colors.properties and font.ttf. Port of
-    /// `TermuxActivity.reloadActivityStyling()` / `checkForFontAndColors()`.
     func reloadSettings() {
-        properties = TermuxProperties.load(from: paths.propertiesFile)
-        for warning in properties.warnings {
+        let loadedProperties = TermuxProperties.load(from: paths.propertiesFile)
+        for warning in loadedProperties.warnings {
             NSLog("Termux: termux.properties: %@", warning)
         }
 
-        let extraKeys = ExtraKeysInfo.loadWithFallback(extraKeys: properties.extraKeys, style: properties.extraKeysStyle)
+        let extraKeys = ExtraKeysInfo.loadWithFallback(extraKeys: loadedProperties.extraKeys, style: loadedProperties.extraKeysStyle)
         extraKeysInfo = extraKeys.info
         extraKeysError = extraKeys.error
 
-        // Colors: an empty map resets the scheme to the defaults.
         let colors = JavaPropertiesParser.parse(contentsOf: paths.colorsPropertiesFile) ?? [:]
         TerminalColors.colorScheme.updateWith(properties: colors)
 
@@ -78,23 +70,28 @@ final class TermuxEnvironment {
             customFontData = nil
         }
 
+        properties = loadedProperties
+
         for session in sessionManager.sessions {
             session.emulator?.colors.reset()
-            // Re-reads the cursor style from the client (`terminal-cursor-style`).
             session.updateTerminalSessionClient(sessionManager)
         }
 
         restartWatcher()
-        NotificationCenter.default.post(name: TermuxEnvironment.settingsDidChangeNotification, object: self)
+        notifySettingsChanged()
     }
 
-    /// Notify observers that a preference changed (font size, theme, ...).
     func preferencesDidChange() {
+        notifySettingsChanged()
+    }
+
+    private func notifySettingsChanged() {
+        settingsRevision += 1
         NotificationCenter.default.post(name: TermuxEnvironment.settingsDidChangeNotification, object: self)
     }
 
     private func restartWatcher() {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         let candidates = [
             paths.termuxConfigDirectory,
             paths.termuxConfigDirectory2,
@@ -103,12 +100,11 @@ final class TermuxEnvironment {
             paths.colorsPropertiesFile,
             paths.fontFile,
         ]
-        watcher?.watch(candidates.filter { fm.fileExists(atPath: $0.path) })
+        watcher?.watch(candidates.filter { fileManager.fileExists(atPath: $0.path) })
     }
 
-    /// The environment variables for new shells.
     func shellEnvironment() -> [String: String] {
-        var env: [String: String] = [
+        var environmentVariables: [String: String] = [
             "HOME": paths.homeDirectory.path,
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
@@ -116,22 +112,22 @@ final class TermuxEnvironment {
             "TERMUX_APP": "ios",
             "TERMUX_VERSION": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0",
         ]
-        if let dir = properties.defaultWorkingDirectory {
+        if let directory = properties.defaultWorkingDirectory {
             let expanded: String
-            if dir == "~" {
+            if directory == "~" {
                 expanded = paths.homeDirectory.path
-            } else if dir.hasPrefix("~/") {
-                expanded = paths.homeDirectory.appendingPathComponent(String(dir.dropFirst(2))).path
-            } else if dir.hasPrefix("/") {
-                expanded = dir
+            } else if directory.hasPrefix("~/") {
+                expanded = paths.homeDirectory.appendingPathComponent(String(directory.dropFirst(2))).path
+            } else if directory.hasPrefix("/") {
+                expanded = directory
             } else {
-                expanded = paths.homeDirectory.appendingPathComponent(dir).path
+                expanded = paths.homeDirectory.appendingPathComponent(directory).path
             }
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory), isDirectory.boolValue {
-                env["PWD"] = expanded
+                environmentVariables["PWD"] = expanded
             }
         }
-        return env
+        return environmentVariables
     }
 }

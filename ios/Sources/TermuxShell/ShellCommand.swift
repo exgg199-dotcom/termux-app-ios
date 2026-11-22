@@ -80,7 +80,7 @@ public final class CommandRegistry {
 /// Everything a running command can access.
 public final class CommandContext {
     /// Full argument vector; `arguments[0]` is the command name.
-    public let arguments: [String]
+    public let argumentVector: [String]
     public let stdin: ShellInputStream
     public let stdout: ShellOutputStream
     public let stderr: ShellOutputStream
@@ -91,16 +91,16 @@ public final class CommandContext {
     /// Working directory at the time the command started.
     public let currentDirectory: String
 
-    public init(arguments: [String], stdin: ShellInputStream, stdout: ShellOutputStream, stderr: ShellOutputStream,
+    public init(argumentVector: [String], stdin: ShellInputStream, stdout: ShellOutputStream, stderr: ShellOutputStream,
                 shell: ShellInterpreter, cancellation: CancellationToken, environment: [String: String], currentDirectory: String) {
-        self.arguments = arguments; self.stdin = stdin; self.stdout = stdout; self.stderr = stderr
+        self.argumentVector = argumentVector; self.stdin = stdin; self.stdout = stdout; self.stderr = stderr
         self.shell = shell; self.cancellation = cancellation; self.environment = environment
         self.currentDirectory = currentDirectory
     }
 
-    public var name: String { arguments.first ?? "" }
+    public var name: String { argumentVector.first ?? "" }
     /// Arguments without the command name.
-    public var args: [String] { Array(arguments.dropFirst()) }
+    public var args: [String] { Array(argumentVector.dropFirst()) }
     public var isCancelled: Bool { cancellation.isCancelled }
     /// True if the command should stop producing output (cancelled or reader gone).
     public var shouldStop: Bool { cancellation.isCancelled || stdout.isClosed }

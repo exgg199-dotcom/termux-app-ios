@@ -43,7 +43,7 @@ enum FileCommands {
         }
     }
 
-    static func errno(_ error: Error) -> String {
+    static func errorDescription(_ error: Error) -> String {
         let ns = error as NSError
         if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSPOSIXErrorDomain {
             return String(cString: strerror(Int32(underlying.code)))
@@ -255,7 +255,7 @@ enum FileCommands {
                 try fm.createDirectory(atPath: path, withIntermediateDirectories: opts.has("p"), attributes: attrs)
                 if opts.has("v") { ctx.print("mkdir: created directory '\(d)'") }
             } catch {
-                ctx.error("cannot create directory '\(d)': \(errno(error))"); status = 1
+                ctx.error("cannot create directory '\(d)': \(errorDescription(error))"); status = 1
             }
         }
         return status
@@ -272,7 +272,7 @@ enum FileCommands {
             if let c = try? fm.contentsOfDirectory(atPath: path), !c.isEmpty {
                 ctx.error("failed to remove '\(d)': Directory not empty"); status = 1; continue
             }
-            do { try fm.removeItem(atPath: path) } catch { ctx.error("failed to remove '\(d)': \(errno(error))"); status = 1 }
+            do { try fm.removeItem(atPath: path) } catch { ctx.error("failed to remove '\(d)': \(errorDescription(error))"); status = 1 }
         }
         return status
     }
@@ -307,7 +307,7 @@ enum FileCommands {
                 try fm.removeItem(atPath: path)
                 if opts.has("v") { ctx.print("removed '\(f)'") }
             } catch {
-                ctx.error("cannot remove '\(f)': \(errno(error))"); status = 1
+                ctx.error("cannot remove '\(f)': \(errorDescription(error))"); status = 1
             }
         }
         return status
@@ -343,7 +343,7 @@ enum FileCommands {
                     if existing.isDirectory && info.isDirectory {
                         // Merge: copy children into the existing directory.
                         for child in try fm.contentsOfDirectory(atPath: srcPath) {
-                            let sub = CommandContext(arguments: ["cp", "-r", srcPath + "/" + child, target], stdin: ctx.stdin, stdout: ctx.stdout,
+                            let sub = CommandContext(argumentVector: ["cp", "-r", srcPath + "/" + child, target], stdin: ctx.stdin, stdout: ctx.stdout,
                                                      stderr: ctx.stderr, shell: ctx.shell, cancellation: ctx.cancellation,
                                                      environment: ctx.environment, currentDirectory: ctx.currentDirectory)
                             if cp(sub) != 0 { status = 1 }
@@ -356,7 +356,7 @@ enum FileCommands {
                 try fm.copyItem(atPath: srcPath, toPath: target)
                 if opts.has("v") { ctx.print("'\(src)' -> '\(target)'") }
             } catch {
-                ctx.error("cannot copy '\(src)': \(errno(error))"); status = 1
+                ctx.error("cannot copy '\(src)': \(errorDescription(error))"); status = 1
             }
         }
         return status
@@ -389,7 +389,7 @@ enum FileCommands {
                 try fm.moveItem(atPath: srcPath, toPath: target)
                 if opts.has("v") { ctx.print("renamed '\(src)' -> '\(target)'") }
             } catch {
-                ctx.error("cannot move '\(src)' to '\(dest)': \(errno(error))"); status = 1
+                ctx.error("cannot move '\(src)' to '\(dest)': \(errorDescription(error))"); status = 1
             }
         }
         return status
@@ -405,7 +405,7 @@ enum FileCommands {
             let path = ctx.resolve(f)
             if fm.fileExists(atPath: path) {
                 do { try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: path) }
-                catch { ctx.error("setting times of '\(f)': \(errno(error))"); status = 1 }
+                catch { ctx.error("setting times of '\(f)': \(errorDescription(error))"); status = 1 }
             } else if !opts.has("c") {
                 if !fm.createFile(atPath: path, contents: nil) {
                     let reason = fm.fileExists(atPath: ShellPath.dirname(path)) ? "Permission denied" : "No such file or directory"
@@ -440,7 +440,7 @@ enum FileCommands {
                 }
                 if opts.has("v") { ctx.print("'\(linkPath)' -> '\(target)'") }
             } catch {
-                ctx.error("failed to create link '\(dest)' -> '\(target)': \(errno(error))"); status = 1
+                ctx.error("failed to create link '\(dest)' -> '\(target)': \(errorDescription(error))"); status = 1
             }
             destPath = ctx.resolve(dest)
         }
@@ -699,7 +699,7 @@ enum FileCommands {
                 ctx.error("invalid mode: '\(spec)'"); status = 1; return
             }
             do { try fm.setAttributes([.posixPermissions: Int(mode)], ofItemAtPath: path) }
-            catch { ctx.error("changing permissions of '\(label)': \(errno(error))"); status = 1 }
+            catch { ctx.error("changing permissions of '\(label)': \(errorDescription(error))"); status = 1 }
             if recursive && info.isDirectory, let children = try? fm.contentsOfDirectory(atPath: path) {
                 for c in children { apply(path + "/" + c, label + "/" + c) }
             }

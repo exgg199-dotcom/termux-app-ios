@@ -1,25 +1,6 @@
 import Foundation
 
-// Port of `com.termux.shared.termux.settings.properties.TermuxPropertyConstants`,
-// `TermuxSharedProperties` and `SharedProperties` (the subset that makes sense on iOS), plus a
-// `java.util.Properties.load()` compatible parser.
-//
-// UIKit-free so that it can be unit tested on any platform.
-
-/// Parser for the `java.util.Properties` text format used by `termux.properties` and
-/// `colors.properties`.
 public enum JavaPropertiesParser {
-
-    /// Parse properties text. Port of `java.util.Properties.load(Reader)`:
-    ///
-    /// * `#` and `!` start comment lines, blank lines are ignored.
-    /// * A line ending with an odd number of backslashes continues on the next line (leading
-    ///   whitespace of the continuation line is skipped).
-    /// * The key ends at the first unescaped `=`, `:` or whitespace; whitespace and one `=`/`:`
-    ///   after the key are skipped.
-    /// * Escapes `\t`, `\n`, `\r`, `\f`, `\uXXXX` and `\<char>` are supported in keys and values.
-    ///
-    /// Later definitions of a key replace earlier ones, like in Java.
     public static func parse(_ text: String) -> [String: String] {
         var result: [String: String] = [:]
         for logicalLine in logicalLines(text) {
@@ -29,67 +10,61 @@ public enum JavaPropertiesParser {
         return result
     }
 
-    /// Parse a properties file, returns `nil` if it can't be read.
     public static func parse(contentsOf url: URL) -> [String: String]? {
         guard let data = try? Data(contentsOf: url) else { return nil }
-        // Java reads termux.properties as UTF-8, fall back to Latin-1 for invalid data.
         let text = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
         return parse(text)
     }
 
-    private static func isWhitespace(_ c: Unicode.Scalar) -> Bool {
-        return c == " " || c == "\t" || c == "\u{0C}"
+    private static func isWhitespace(_ character: Unicode.Scalar) -> Bool {
+        return character == " " || character == "\t" || character == "\u{0C}"
     }
 
-    /// Split the text into logical lines (comments and blank lines removed, continuations joined).
-    /// The returned lines still contain their escape sequences.
     static func logicalLines(_ text: String) -> [[Unicode.Scalar]] {
-        // Split into natural lines on \n, \r and \r\n.
         var naturalLines: [[Unicode.Scalar]] = []
         var current: [Unicode.Scalar] = []
         var previousWasCR = false
-        for c in text.unicodeScalars {
-            if c == "\n" {
+        for character in text.unicodeScalars {
+            if character == "\n" {
                 if previousWasCR {
                     previousWasCR = false
                     continue
                 }
                 naturalLines.append(current)
                 current = []
-            } else if c == "\r" {
+            } else if character == "\r" {
                 naturalLines.append(current)
                 current = []
                 previousWasCR = true
                 continue
             } else {
-                current.append(c)
+                current.append(character)
             }
             previousWasCR = false
         }
         naturalLines.append(current)
 
         var result: [[Unicode.Scalar]] = []
-        var index = 0
-        while index < naturalLines.count {
-            var line = Array(naturalLines[index].drop(while: isWhitespace))
-            index += 1
+        var lineIndex = 0
+        while lineIndex < naturalLines.count {
+            var line = Array(naturalLines[lineIndex].drop(while: isWhitespace))
+            lineIndex += 1
             if line.isEmpty { continue }
             if line[0] == "#" || line[0] == "!" { continue }
 
             var logical: [Unicode.Scalar] = []
             while true {
-                // Count trailing backslashes.
                 var backslashes = 0
-                var i = line.count - 1
-                while i >= 0 && line[i] == "\\" {
+                var backslashIndex = line.count - 1
+                while backslashIndex >= 0 && line[backslashIndex] == "\\" {
                     backslashes += 1
-                    i -= 1
+                    backslashIndex -= 1
                 }
                 if backslashes % 2 == 1 {
                     logical.append(contentsOf: line.dropLast())
-                    if index < naturalLines.count {
-                        line = Array(naturalLines[index].drop(while: isWhitespace))
-                        index += 1
+                    if lineIndex < naturalLines.count {
+                        line = Array(naturalLines[lineIndex].drop(while: isWhitespace))
+                        lineIndex += 1
                         continue
                     }
                     break
@@ -104,94 +79,91 @@ public enum JavaPropertiesParser {
     }
 
     static func splitKeyValue(_ line: [Unicode.Scalar]) -> (String, String) {
-        var keyLen = 0
+        var keyLength = 0
         var valueStart = line.count
-        var hasSep = false
+        var hasSeparator = false
         var precedingBackslash = false
-        while keyLen < line.count {
-            let c = line[keyLen]
-            if (c == "=" || c == ":") && !precedingBackslash {
-                valueStart = keyLen + 1
-                hasSep = true
+        while keyLength < line.count {
+            let character = line[keyLength]
+            if (character == "=" || character == ":") && !precedingBackslash {
+                valueStart = keyLength + 1
+                hasSeparator = true
                 break
-            } else if isWhitespace(c) && !precedingBackslash {
-                valueStart = keyLen + 1
+            } else if isWhitespace(character) && !precedingBackslash {
+                valueStart = keyLength + 1
                 break
             }
-            if c == "\\" {
+            if character == "\\" {
                 precedingBackslash = !precedingBackslash
             } else {
                 precedingBackslash = false
             }
-            keyLen += 1
+            keyLength += 1
         }
         while valueStart < line.count {
-            let c = line[valueStart]
-            if !isWhitespace(c) {
-                if !hasSep && (c == "=" || c == ":") {
-                    hasSep = true
+            let character = line[valueStart]
+            if !isWhitespace(character) {
+                if !hasSeparator && (character == "=" || character == ":") {
+                    hasSeparator = true
                 } else {
                     break
                 }
             }
             valueStart += 1
         }
-        let key = unescape(Array(line[0..<keyLen]))
+        let key = unescape(Array(line[0..<keyLength]))
         let value = valueStart < line.count ? unescape(Array(line[valueStart...])) : ""
         return (key, value)
     }
 
-    static func unescape(_ chars: [Unicode.Scalar]) -> String {
-        var out = String.UnicodeScalarView()
-        var i = 0
-        while i < chars.count {
-            let c = chars[i]
-            i += 1
-            if c != "\\" {
-                out.append(c)
+    static func unescape(_ characters: [Unicode.Scalar]) -> String {
+        var output = String.UnicodeScalarView()
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            index += 1
+            if character != "\\" {
+                output.append(character)
                 continue
             }
-            guard i < chars.count else { break }
-            let e = chars[i]
-            i += 1
-            switch e {
-            case "t": out.append("\t")
-            case "n": out.append("\n")
-            case "r": out.append("\r")
-            case "f": out.append("\u{0C}")
+            guard index < characters.count else { break }
+            let escaped = characters[index]
+            index += 1
+            switch escaped {
+            case "t": output.append("\t")
+            case "n": output.append("\n")
+            case "r": output.append("\r")
+            case "f": output.append("\u{0C}")
             case "u":
                 var value: UInt32 = 0
                 var digits = 0
-                while digits < 4 && i < chars.count, let d = hexValue(chars[i]) {
-                    value = value * 16 + d
+                while digits < 4 && index < characters.count, let digit = hexValue(characters[index]) {
+                    value = value * 16 + digit
                     digits += 1
-                    i += 1
+                    index += 1
                 }
                 if digits == 4, let scalar = Unicode.Scalar(value) {
-                    out.append(scalar)
+                    output.append(scalar)
                 }
             default:
-                out.append(e)
+                output.append(escaped)
             }
         }
-        return String(out)
+        return String(output)
     }
 
-    private static func hexValue(_ c: Unicode.Scalar) -> UInt32? {
-        switch c.value {
-        case 0x30...0x39: return c.value - 0x30
-        case 0x41...0x46: return c.value - 0x41 + 10
-        case 0x61...0x66: return c.value - 0x61 + 10
+    private static func hexValue(_ character: Unicode.Scalar) -> UInt32? {
+        switch character.value {
+        case 0x30...0x39: return character.value - 0x30
+        case 0x41...0x46: return character.value - 0x41 + 10
+        case 0x61...0x66: return character.value - 0x61 + 10
         default: return nil
         }
     }
 }
 
-/// The location of the Termux files inside the app sandbox.
 public struct TermuxPaths {
-    /// The app's Documents directory, exposed in the Files app (UIFileSharingEnabled).
     public let documentsDirectory: URL
-    /// `$HOME`, i.e. `Documents/home`.
     public let homeDirectory: URL
 
     public init(documentsDirectory: URL) {
@@ -199,42 +171,30 @@ public struct TermuxPaths {
         self.homeDirectory = documentsDirectory.appendingPathComponent("home", isDirectory: true)
     }
 
-    /// The paths for the app's real Documents directory.
     public static func appDefault() -> TermuxPaths {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents", isDirectory: true)
         return TermuxPaths(documentsDirectory: documents)
     }
 
-    /// `~/.termux`
     public var termuxConfigDirectory: URL { return homeDirectory.appendingPathComponent(".termux", isDirectory: true) }
-    /// `~/.config/termux`
     public var termuxConfigDirectory2: URL {
         return homeDirectory.appendingPathComponent(".config", isDirectory: true).appendingPathComponent("termux", isDirectory: true)
     }
-    /// `~/.termux/termux.properties`
     public var primaryPropertiesFile: URL { return termuxConfigDirectory.appendingPathComponent("termux.properties") }
-    /// `~/.config/termux/termux.properties`
     public var secondaryPropertiesFile: URL { return termuxConfigDirectory2.appendingPathComponent("termux.properties") }
-    /// `~/.termux/colors.properties`
     public var colorsPropertiesFile: URL { return termuxConfigDirectory.appendingPathComponent("colors.properties") }
-    /// `~/.termux/font.ttf`
     public var fontFile: URL { return termuxConfigDirectory.appendingPathComponent("font.ttf") }
-    /// `~/.termux/motd`: replaces the built-in message of the day if it exists.
     public var motdFile: URL { return termuxConfigDirectory.appendingPathComponent("motd") }
-    /// `~/.hushlogin`: suppresses the message of the day, like in Termux.
     public var hushLoginFile: URL { return homeDirectory.appendingPathComponent(".hushlogin") }
 
-    /// The termux.properties file that is used: like Termux, `~/.termux/termux.properties` if it
-    /// exists, otherwise `~/.config/termux/termux.properties`.
     public var propertiesFile: URL {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: primaryPropertiesFile.path) { return primaryPropertiesFile }
-        if fm.fileExists(atPath: secondaryPropertiesFile.path) { return secondaryPropertiesFile }
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: primaryPropertiesFile.path) { return primaryPropertiesFile }
+        if fileManager.fileExists(atPath: secondaryPropertiesFile.path) { return secondaryPropertiesFile }
         return primaryPropertiesFile
     }
 
-    /// Display a path relative to `$HOME` as `~/...`.
     public func displayPath(_ url: URL) -> String {
         let home = homeDirectory.standardizedFileURL.path
         let path = url.standardizedFileURL.path
@@ -244,20 +204,17 @@ public struct TermuxPaths {
     }
 }
 
-/// The bell behaviour (`bell-character`).
 public enum BellBehaviour: String, CaseIterable {
     case vibrate
     case beep
     case ignore
 }
 
-/// The soft keyboard toggle behaviour (`soft-keyboard-toggle-behaviour`).
 public enum SoftKeyboardToggleBehaviour: String {
     case showHide = "show/hide"
     case enableDisable = "enable/disable"
 }
 
-/// Actions for `shortcut.*` session shortcuts.
 public enum SessionShortcutAction: Int {
     case createSession = 1
     case nextSession = 2
@@ -270,12 +227,7 @@ public struct SessionShortcut: Equatable {
     public let action: SessionShortcutAction
 }
 
-/// Typed values of `termux.properties`. Port of `TermuxSharedProperties` /
-/// `TermuxPropertyConstants`, restricted to the properties that make sense on iOS.
 public struct TermuxProperties {
-
-    // MARK: Keys
-
     public static let KEY_EXTRA_KEYS = "extra-keys"
     public static let KEY_EXTRA_KEYS_STYLE = "extra-keys-style"
     public static let KEY_EXTRA_KEYS_TEXT_ALL_CAPS = "extra-keys-text-all-caps"
@@ -300,9 +252,6 @@ public struct TermuxProperties {
     public static let KEY_SHORTCUT_PREVIOUS_SESSION = "shortcut.previous-session"
     public static let KEY_SHORTCUT_RENAME_SESSION = "shortcut.rename-session"
 
-    // MARK: Ranges and defaults
-
-    /// `TerminalEmulator.TERMINAL_CURSOR_STYLE_*` values.
     public static let TERMINAL_CURSOR_STYLE_BLOCK = 0
     public static let TERMINAL_CURSOR_STYLE_UNDERLINE = 1
     public static let TERMINAL_CURSOR_STYLE_BAR = 2
@@ -313,12 +262,10 @@ public struct TermuxProperties {
     ]
     public static let DEFAULT_IVALUE_TERMINAL_CURSOR_STYLE = TERMINAL_CURSOR_STYLE_BLOCK
 
-    /// `TerminalView.TERMINAL_CURSOR_BLINK_RATE_MIN/MAX`, 0 disables blinking.
     public static let IVALUE_TERMINAL_CURSOR_BLINK_RATE_MIN = 100
     public static let IVALUE_TERMINAL_CURSOR_BLINK_RATE_MAX = 2000
     public static let DEFAULT_IVALUE_TERMINAL_CURSOR_BLINK_RATE = 0
 
-    /// `TerminalEmulator.TERMINAL_TRANSCRIPT_ROWS_MIN/MAX`, `DEFAULT_TERMINAL_TRANSCRIPT_ROWS`.
     public static let IVALUE_TERMINAL_TRANSCRIPT_ROWS_MIN = 100
     public static let IVALUE_TERMINAL_TRANSCRIPT_ROWS_MAX = 50000
     public static let DEFAULT_IVALUE_TERMINAL_TRANSCRIPT_ROWS = 2000
@@ -337,9 +284,6 @@ public struct TermuxProperties {
     public static let DEFAULT_IVALUE_EXTRA_KEYS = ExtraKeysInfo.DEFAULT_EXTRA_KEYS
     public static let DEFAULT_IVALUE_EXTRA_KEYS_STYLE = ExtraKeysInfo.DEFAULT_EXTRA_KEYS_STYLE
 
-    // MARK: Values
-
-    /// The raw key/value pairs read from the file.
     public let rawProperties: [String: String]
 
     public var extraKeys: String
@@ -353,7 +297,6 @@ public struct TermuxProperties {
     public var terminalMarginVertical: Int
     public var terminalToolbarHeightScaleFactor: Double
     public var terminalOnclickUrlOpen: Bool
-    /// `night-mode`: "true", "false" or "system" (`use-black-ui=true` maps to "true").
     public var nightMode: String
     public var fullscreen: Bool
     public var hideSoftKeyboardOnStartup: Bool
@@ -362,10 +305,8 @@ public struct TermuxProperties {
     public var terminalSessionChangeToastDisabled: Bool
     public var defaultWorkingDirectory: String?
     public var sessionShortcuts: [SessionShortcut]
-    /// Problems found while parsing, to be logged or shown to the user.
     public var warnings: [String] = []
 
-    /// The defaults (no termux.properties file).
     public init() {
         self.init(properties: [:])
     }
@@ -379,32 +320,31 @@ public struct TermuxProperties {
             return value
         }
 
-        func bool(_ key: String, default def: Bool) -> Bool {
-            guard let value = string(key) else { return def }
+        func bool(_ key: String, default defaultValue: Bool) -> Bool {
+            guard let value = string(key) else { return defaultValue }
             switch value.lowercased() {
             case "true": return true
             case "false": return false
             default:
-                warnings.append("The value \"\(value)\" for the key \"\(key)\" is invalid, using \(def).")
-                return def
+                warnings.append("The value \"\(value)\" for the key \"\(key)\" is invalid, using \(defaultValue).")
+                return defaultValue
             }
         }
 
-        func int(_ key: String, default def: Int, min: Int, max: Int, allowZero: Bool = false) -> Int {
-            guard let value = string(key) else { return def }
+        func int(_ key: String, default defaultValue: Int, min: Int, max: Int, allowZero: Bool = false) -> Int {
+            guard let value = string(key) else { return defaultValue }
             guard let parsed = Int(value.trimmingCharacters(in: .whitespaces)) else {
-                warnings.append("The value \"\(value)\" for the key \"\(key)\" is not an integer, using \(def).")
-                return def
+                warnings.append("The value \"\(value)\" for the key \"\(key)\" is not an integer, using \(defaultValue).")
+                return defaultValue
             }
             if allowZero && parsed == 0 { return 0 }
             if parsed < min || parsed > max {
-                warnings.append("The value \"\(value)\" for the key \"\(key)\" is not between \(min) and \(max), using \(def).")
-                return def
+                warnings.append("The value \"\(value)\" for the key \"\(key)\" is not between \(min) and \(max), using \(defaultValue).")
+                return defaultValue
             }
             return parsed
         }
 
-        // extra-keys / extra-keys-style: the value itself if not empty, otherwise the default.
         if let value = string(TermuxProperties.KEY_EXTRA_KEYS), !value.isEmpty {
             extraKeys = value
         } else {
@@ -474,7 +414,6 @@ public struct TermuxProperties {
 
         terminalOnclickUrlOpen = bool(TermuxProperties.KEY_TERMINAL_ONCLICK_URL_OPEN, default: false)
 
-        // night-mode, with the deprecated use-black-ui as fallback.
         if let value = string(TermuxProperties.KEY_NIGHT_MODE), ["true", "false", "system"].contains(value.lowercased()) {
             nightMode = value.lowercased()
         } else {
@@ -524,7 +463,6 @@ public struct TermuxProperties {
         self.warnings = warnings
     }
 
-    /// Port of `TermuxSharedProperties.getCodePointForSessionShortcuts()`: parse "ctrl + t".
     public static func getCodePointForSessionShortcuts(_ value: String) -> Int? {
         let parts = value.lowercased().trimmingCharacters(in: .whitespaces).components(separatedBy: "+")
         guard parts.count == 2, parts[0].trimmingCharacters(in: .whitespaces) == "ctrl" else { return nil }
@@ -534,7 +472,6 @@ public struct TermuxProperties {
         return Int(scalars[0].value)
     }
 
-    /// Load the properties from a file. A missing or unreadable file gives the defaults.
     public static func load(from url: URL) -> TermuxProperties {
         guard let properties = JavaPropertiesParser.parse(contentsOf: url) else {
             return TermuxProperties()
@@ -542,10 +479,8 @@ public struct TermuxProperties {
         return TermuxProperties(properties: properties)
     }
 
-    /// The session shortcut action for a code point typed with ctrl, if any.
     public func sessionShortcutAction(forCodePoint codePoint: Int) -> SessionShortcutAction? {
         let lower = TerminalInputLowercase.lowercase(codePoint)
-        // Later shortcuts take precedence like in TermuxTerminalViewClient.
         for shortcut in sessionShortcuts.reversed() where shortcut.codePoint == lower {
             return shortcut.action
         }

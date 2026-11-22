@@ -21,7 +21,7 @@ final class ShellSyntaxTests: XCTestCase {
         XCTAssertEqual(w.count, 4)
         XCTAssertEqual(w[1].parts, [.quoted("a b")])
         XCTAssertEqual(w[2].parts, [.quoted("c d")])
-        XCTAssertEqual(w[3].parts, [.literal("e"), .quoted(" f")])
+        XCTAssertEqual(w[3].parts, [.literal("e"), .quoted(" "), .literal("f")])
     }
 
     func testEmptyQuotesProduceWord() throws {
@@ -54,7 +54,7 @@ final class ShellSyntaxTests: XCTestCase {
 
     func testOperators() throws {
         let t = try ShellLexer.tokenize("a && b || c; d | e")
-        XCTAssertEqual(t.filter { if case .op = $0 { return true }; return false }, [.op("&&"), .op("||"), .op(";"), .op("|")])
+        XCTAssertEqual(t.filter { if case .controlOperator = $0 { return true }; return false }, [.controlOperator("&&"), .controlOperator("||"), .controlOperator(";"), .controlOperator("|")])
     }
 
     func testRedirections() throws {

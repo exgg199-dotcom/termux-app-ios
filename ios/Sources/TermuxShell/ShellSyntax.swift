@@ -99,7 +99,7 @@ public enum ShellSyntaxError: Error, Equatable, CustomStringConvertible {
 
 public enum ShellToken: Equatable {
     case word(ShellWord)
-    case op(String)            // ; & && || | ( )
+    case controlOperator(String)
     case redirect(Int?, RedirectionOperator)
     case newline
 }
@@ -141,7 +141,7 @@ public struct ShellLexer {
             }
             if c == "\n" { out.append(.newline); i += 1; continue }
             if let (fd, op) = readRedirect(fd: nil) { out.append(.redirect(fd, op)); continue }
-            if let op = readOperator() { out.append(.op(op)); continue }
+            if let op = readOperator() { out.append(.controlOperator(op)); continue }
             let word = try readWord()
             // IO number: digits immediately followed by < or >
             if let lit = word.plainLiteral, !lit.isEmpty, lit.allSatisfy({ $0.isASCII && $0.isNumber }),
@@ -409,11 +409,11 @@ public struct ShellParser {
 
     private var atEnd: Bool { pos >= tokens.count }
     private func peek() -> ShellToken? { pos < tokens.count ? tokens[pos] : nil }
-    private func peekOp() -> String? { if case .op(let o)? = peek() { return o }; return nil }
+    private func peekOp() -> String? { if case .controlOperator(let o)? = peek() { return o }; return nil }
 
     private static func describe(_ t: ShellToken?) -> String {
         switch t {
-        case .op(let o)?: return o
+        case .controlOperator(let o)?: return o
         case .redirect(_, let r)?: return r.rawValue
         case .newline?, nil: return "newline"
         case .word(let w)?: return w.plainLiteral ?? "word"

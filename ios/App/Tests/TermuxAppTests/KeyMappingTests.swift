@@ -1,7 +1,6 @@
 import XCTest
 
 final class KeyMappingTests: XCTestCase {
-
     func testHIDToAndroidKeyCodes() {
         XCTAssertEqual(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x52), AndroidKeyEvent.KEYCODE_DPAD_UP)
         XCTAssertEqual(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x51), AndroidKeyEvent.KEYCODE_DPAD_DOWN)
@@ -21,17 +20,15 @@ final class KeyMappingTests: XCTestCase {
         XCTAssertEqual(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x59), AndroidKeyEvent.KEYCODE_NUMPAD_1)
         XCTAssertEqual(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x62), AndroidKeyEvent.KEYCODE_NUMPAD_0)
         XCTAssertEqual(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x58), AndroidKeyEvent.KEYCODE_NUMPAD_ENTER)
-        // Letters, digits and space go through the text input system.
-        XCTAssertNil(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x04)) // a
-        XCTAssertNil(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x1E)) // 1
-        XCTAssertNil(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x2C)) // space
+        XCTAssertNil(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x04))
+        XCTAssertNil(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x1E))
+        XCTAssertNil(HardwareKeyMapper.androidKeyCode(forHIDUsage: 0x2C))
         XCTAssertTrue(HardwareKeyMapper.isModifierKey(0xE0))
         XCTAssertTrue(HardwareKeyMapper.isModifierKey(0xE7))
         XCTAssertFalse(HardwareKeyMapper.isModifierKey(0x04))
     }
 
     func testAndroidKeyCodeValues() {
-        // Must match android.view.KeyEvent, KeyHandler is a 1:1 port.
         XCTAssertEqual(AndroidKeyEvent.KEYCODE_DPAD_UP, 19)
         XCTAssertEqual(AndroidKeyEvent.KEYCODE_ENTER, 66)
         XCTAssertEqual(AndroidKeyEvent.KEYCODE_DEL, 67)
@@ -73,10 +70,9 @@ final class KeyMappingTests: XCTestCase {
     }
 
     func testSoftKeyboardCodePoint() {
-        // Return key sends "\n", converted to ctrl+m (\r).
         let enter = TerminalInput.softKeyboardCodePoint(10)
         XCTAssertEqual(enter.codePoint, Int(UnicodeScalar("m").value))
-        XCTAssertTrue(enter.ctrlHeld)
+        XCTAssertTrue(enter.controlHeld)
         XCTAssertEqual(TerminalInput.applyControl(enter.codePoint), 13)
 
         let tab = TerminalInput.softKeyboardCodePoint(9)
@@ -88,37 +84,36 @@ final class KeyMappingTests: XCTestCase {
 
         let escape = TerminalInput.softKeyboardCodePoint(27)
         XCTAssertEqual(escape.codePoint, 27)
-        XCTAssertFalse(escape.ctrlHeld)
+        XCTAssertFalse(escape.controlHeld)
 
         let letter = TerminalInput.softKeyboardCodePoint(Int(UnicodeScalar("x").value))
         XCTAssertEqual(letter.codePoint, Int(UnicodeScalar("x").value))
-        XCTAssertFalse(letter.ctrlHeld)
+        XCTAssertFalse(letter.controlHeld)
     }
 
     func testUpperCaseAndCodePoints() {
         XCTAssertEqual(TerminalInput.toUpperCase(Int(UnicodeScalar("a").value)), Int(UnicodeScalar("A").value))
         XCTAssertEqual(TerminalInput.toUpperCase(Int(UnicodeScalar("é").value)), Int(UnicodeScalar("É").value))
         XCTAssertEqual(TerminalInput.toUpperCase(Int(UnicodeScalar("1").value)), Int(UnicodeScalar("1").value))
-        // ß uppercases to "SS", which is not a single code point: unchanged.
         XCTAssertEqual(TerminalInput.toUpperCase(0xDF), 0xDF)
         XCTAssertEqual(TerminalInput.codePoints("a😀"), [0x61, 0x1F600])
     }
 
     func testVirtualFnKeys() {
-        func fn(_ c: String) -> VirtualFnKeyResult {
-            return TerminalInput.virtualFnKey(Int(UnicodeScalar(c)!.value))
+        func virtualFunctionKey(_ character: String) -> VirtualFunctionKeyResult {
+            return TerminalInput.virtualFunctionKey(Int(UnicodeScalar(character)!.value))
         }
-        XCTAssertEqual(fn("w"), .keyCode(AndroidKeyEvent.KEYCODE_DPAD_UP))
-        XCTAssertEqual(fn("W"), .keyCode(AndroidKeyEvent.KEYCODE_DPAD_UP))
-        XCTAssertEqual(fn("a"), .keyCode(AndroidKeyEvent.KEYCODE_DPAD_LEFT))
-        XCTAssertEqual(fn("1"), .keyCode(AndroidKeyEvent.KEYCODE_F1))
-        XCTAssertEqual(fn("9"), .keyCode(AndroidKeyEvent.KEYCODE_F9))
-        XCTAssertEqual(fn("0"), .keyCode(AndroidKeyEvent.KEYCODE_F10))
-        XCTAssertEqual(fn("e"), .codePoint(27, altDown: false))
-        XCTAssertEqual(fn("b"), .codePoint(Int(UnicodeScalar("b").value), altDown: true))
-        XCTAssertEqual(fn("u"), .codePoint(Int(UnicodeScalar("_").value), altDown: false))
-        XCTAssertEqual(fn("k"), .toggleKeyboard)
-        XCTAssertEqual(fn("v"), .consumed)
-        XCTAssertEqual(fn("z"), .none)
+        XCTAssertEqual(virtualFunctionKey("w"), .keyCode(AndroidKeyEvent.KEYCODE_DPAD_UP))
+        XCTAssertEqual(virtualFunctionKey("W"), .keyCode(AndroidKeyEvent.KEYCODE_DPAD_UP))
+        XCTAssertEqual(virtualFunctionKey("a"), .keyCode(AndroidKeyEvent.KEYCODE_DPAD_LEFT))
+        XCTAssertEqual(virtualFunctionKey("1"), .keyCode(AndroidKeyEvent.KEYCODE_F1))
+        XCTAssertEqual(virtualFunctionKey("9"), .keyCode(AndroidKeyEvent.KEYCODE_F9))
+        XCTAssertEqual(virtualFunctionKey("0"), .keyCode(AndroidKeyEvent.KEYCODE_F10))
+        XCTAssertEqual(virtualFunctionKey("e"), .codePoint(27, altDown: false))
+        XCTAssertEqual(virtualFunctionKey("b"), .codePoint(Int(UnicodeScalar("b").value), altDown: true))
+        XCTAssertEqual(virtualFunctionKey("u"), .codePoint(Int(UnicodeScalar("_").value), altDown: false))
+        XCTAssertEqual(virtualFunctionKey("k"), .toggleKeyboard)
+        XCTAssertEqual(virtualFunctionKey("v"), .consumed)
+        XCTAssertEqual(virtualFunctionKey("z"), .none)
     }
 }

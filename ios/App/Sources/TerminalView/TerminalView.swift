@@ -7,17 +7,7 @@ extension TerminalBuffer: TerminalSelectionTextSource {
     }
 }
 
-/// View displaying and interacting with a `TerminalSession`. Port of `com.termux.view.TerminalView`.
-///
-/// * Renders the emulator screen with `TerminalRenderer` (CoreText) when `setNeedsDisplay()` is
-///   called, i.e. from `onScreenUpdated()` which the client calls on `onTextChanged`.
-/// * Receives text from the software keyboard through `UIKeyInput` and hardware keyboard keys
-///   through `pressesBegan`, both mapped through `KeyHandler` like the Android key events.
-/// * Scrolls through the transcript with a pan gesture (with momentum), sends mouse wheel events
-///   when the terminal tracks the mouse, changes the font size with a pinch, starts text selection
-///   with a long press.
 final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
-
     static let TERMINAL_CURSOR_BLINK_RATE_MIN = 100
     static let TERMINAL_CURSOR_BLINK_RATE_MAX = 2000
 
@@ -25,19 +15,14 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     weak var client: TerminalViewClient?
 
-    /// The currently displayed terminal session, whose emulator is `emulator`.
     private(set) var currentSession: TerminalSession?
-    /// Our terminal emulator whose session is `currentSession`.
     private(set) var emulator: TerminalEmulator?
 
     private(set) var renderer: TerminalRenderer
 
-    /// The top row of text to display. Ranges from -activeTranscriptRows to 0.
     private(set) var topRow = 0
-    /// The top row of sessions that are not displayed (Android stores it in the emulator).
     private var topRowCache: [String: Int] = [:]
 
-    /// Margins around the terminal text (`terminal-margin-horizontal/vertical`).
     var terminalMargins: UIEdgeInsets = UIEdgeInsets(top: 0, left: 3, bottom: 0, right: 3) {
         didSet {
             if terminalMargins != oldValue {
@@ -47,15 +32,10 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
     }
 
-    // MARK: Keyboard
-
-    /// The extra keys row, shown above the keyboard.
     var extraKeysView: UIView? {
         didSet { if isFirstResponder { reloadInputViews() } }
     }
 
-    /// If `false` the software keyboard is hidden but the view stays first responder, so that the
-    /// extra keys and a hardware keyboard keep working (the "KEYBOARD" toggle).
     var isSoftKeyboardEnabled = true {
         didSet { if isFirstResponder && oldValue != isSoftKeyboardEnabled { reloadInputViews() } }
     }
@@ -76,8 +56,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     override var canBecomeFirstResponder: Bool { return true }
 
-    // MARK: UITextInputTraits
-
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none
     var spellCheckingType: UITextSpellCheckingType = .no
@@ -89,16 +67,12 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     var returnKeyType: UIReturnKeyType = .default
     var enablesReturnKeyAutomatically: Bool = false
 
-    // MARK: Selection
-
     private var selection: TerminalSelection?
     private var selectionShowTime: CFTimeInterval = 0
     private let startHandle = TextSelectionHandleView(orientation: .left)
     private let endHandle = TextSelectionHandleView(orientation: .right)
     private var longPressStartPoint: CGPoint = .zero
     private var editMenuInteractionStorage: AnyObject?
-
-    // MARK: Gestures
 
     private(set) var tapRecognizer: UITapGestureRecognizer!
     private(set) var panRecognizer: UIPanGestureRecognizer!
@@ -117,25 +91,17 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
     private var flingRowsScrolled = 0
     private var flingLastTimestamp: CFTimeInterval?
 
-    // MARK: Cursor blinking
-
     private var cursorBlinkTimer: Timer?
     private(set) var terminalCursorBlinkerRate = 0
     private var cursorBlinkVisible = false
-
-    // MARK: Hardware keyboard
 
     private var rightAltDown = false
     private var handledKeyUsages: Set<Int> = []
     private var keyRepeatTimer: Timer?
     private var repeatingUsage: Int?
 
-    // MARK: Scroll indicator
-
     private let scrollIndicator = UIView()
     private var scrollIndicatorHideWork: DispatchWorkItem?
-
-    // MARK: - Init
 
     override init(frame: CGRect) {
         renderer = TerminalRenderer(fontSize: 12, customFontData: nil)
@@ -204,9 +170,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         flingDisplayLink?.invalidate()
     }
 
-    // MARK: - Session
-
-    /// Attach a `TerminalSession` to this view. Port of `attachSession()`.
     @discardableResult
     func attachSession(_ session: TerminalSession) -> Bool {
         if session === currentSession { return false }
@@ -219,7 +182,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
         currentSession = session
         emulator = nil
-        // The cached value will be read in `updateSize()` when emulator is set.
         topRow = 0
 
         updateSize()
@@ -227,12 +189,10 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         return true
     }
 
-    /// Forget the cached state of a removed session.
     func sessionRemoved(_ session: TerminalSession) {
         topRowCache[session.handle] = nil
     }
 
-    /// Called when the screen of the current session changed. Port of `onScreenUpdated()`.
     func onScreenUpdated(skipScrolling: Bool = false) {
         guard let emulator = emulator else { return }
 
@@ -255,23 +215,17 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         invalidate()
     }
 
-    /// Redraw the terminal and reposition the selection handles. Port of `invalidate()`.
     func invalidate() {
         setNeedsDisplay()
         updateSelectionHandles()
     }
 
-    // MARK: - Font
-
-    /// Set the font size and/or custom font. Port of `setTextSize()` and `setTypeface()`.
     func setFont(size: CGFloat, customFontData: Data?) {
         if size == renderer.fontSize && customFontData == renderer.customFontData { return }
         renderer = TerminalRenderer(fontSize: size, customFontData: customFontData)
         updateSize()
         invalidate()
     }
-
-    // MARK: - Layout
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -286,18 +240,15 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
     }
 
-    /// The size of the area the terminal text is drawn in.
     private var contentSize: CGSize {
         return CGSize(width: max(0, bounds.width - terminalMargins.left - terminalMargins.right),
                       height: max(0, bounds.height - terminalMargins.top - terminalMargins.bottom))
     }
 
-    /// Convert a point in view coordinates to terminal content coordinates.
     func contentPoint(_ point: CGPoint) -> CGPoint {
         return CGPoint(x: point.x - terminalMargins.left, y: point.y - terminalMargins.top)
     }
 
-    /// Check if the terminal size in rows and columns should be updated. Port of `updateSize()`.
     func updateSize(force: Bool = false) {
         let size = contentSize
         guard size.width > 0, size.height > 0, let session = currentSession else { return }
@@ -313,9 +264,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             emulator = session.emulator
             client?.onEmulatorSet()
 
-            // Restore cached top row value if session/emulator was switched back from a different
-            // session. The top row value also needs to be maintained after opening/closing the
-            // soft keyboard.
             if emulatorWasNil, let emulator = emulator {
                 let rowsInHistory = emulator.screen.activeTranscriptRows
                 if let cachedTopRow = topRowCache[session.handle], cachedTopRow >= -rowsInHistory {
@@ -330,34 +278,29 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
     }
 
-    // MARK: - Drawing
-
     override func draw(_ rect: CGRect) {
-        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+        guard let context = UIGraphicsGetCurrentContext() else { return }
         let background: UInt32
         if let emulator = emulator {
             background = emulator.colors.currentColors[TextStyle.COLOR_INDEX_BACKGROUND]
         } else {
             background = TerminalColors.colorScheme.defaultColors[TextStyle.COLOR_INDEX_BACKGROUND]
         }
-        ctx.setFillColor(TerminalRenderer.uiColor(background).cgColor)
-        ctx.fill(rect)
+        context.setFillColor(TerminalRenderer.uiColor(background).cgColor)
+        context.fill(rect)
 
         guard let emulator = emulator else { return }
 
-        // Render the terminal view and highlight any selected text.
-        let sel = selection
-        ctx.saveGState()
-        ctx.translateBy(x: terminalMargins.left, y: terminalMargins.top)
+        let currentSelection = selection
+        context.saveGState()
+        context.translateBy(x: terminalMargins.left, y: terminalMargins.top)
         let visible = rect.offsetBy(dx: -terminalMargins.left, dy: -terminalMargins.top)
-        renderer.render(emulator: emulator, context: ctx, topRow: topRow,
-                        selectionY1: sel?.y1 ?? -1, selectionY2: sel?.y2 ?? -1,
-                        selectionX1: sel?.x1 ?? -1, selectionX2: sel?.x2 ?? -1,
+        renderer.render(emulator: emulator, context: context, topRow: topRow,
+                        selectionY1: currentSelection?.y1 ?? -1, selectionY2: currentSelection?.y2 ?? -1,
+                        selectionX1: currentSelection?.x1 ?? -1, selectionX2: currentSelection?.x2 ?? -1,
                         visibleRect: visible)
-        ctx.restoreGState()
+        context.restoreGState()
     }
-
-    // MARK: - Accessibility
 
     override var accessibilityValue: String? {
         get {
@@ -366,8 +309,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
         set { }
     }
-
-    // MARK: - Scroll indicator
 
     private func awakenScrollIndicator() {
         guard let emulator = emulator else { return }
@@ -387,18 +328,13 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
     }
 
-    // MARK: - Gestures
-
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        // The selection handles have their own pan gestures.
         if touch.view is TextSelectionHandleView {
             return false
         }
         return true
     }
 
-    // `UIView` already implements this method (it has the same selector as the delegate method),
-    // so it's an override that serves both.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === pinchRecognizer {
             return emulator != nil && !isSelectingText
@@ -416,7 +352,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
 
         if emulator.isMouseTrackingActive {
-            // Quick event processing when mouse tracking is active.
             sendMouseEventCode(at: point, button: TerminalEmulator.MOUSE_LEFT_BUTTON, pressed: true)
             sendMouseEventCode(at: point, button: TerminalEmulator.MOUSE_LEFT_BUTTON, pressed: false)
             return
@@ -441,7 +376,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             let translationY = recognizer.translation(in: self).y
             let delta = translationY - lastPanTranslationY
             lastPanTranslationY = translationY
-            // Android's distanceY is positive when the finger moves up.
             let result = TerminalScrollMath.rowsForScroll(distanceY: -delta, remainder: scrollRemainder,
                                                           lineHeight: renderer.lineHeight)
             scrollRemainder = result.remainder
@@ -484,19 +418,18 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
                 startTextSelectionMode(at: point)
             }
         case .changed:
-            // Dragging after the long press extends the selection.
-            guard var sel = selection else { return }
-            let dx = point.x - longPressStartPoint.x
-            let dy = point.y - longPressStartPoint.y
-            guard dx * dx + dy * dy > renderer.fontWidth * renderer.fontWidth else { return }
+            guard var currentSelection = selection else { return }
+            let deltaX = point.x - longPressStartPoint.x
+            let deltaY = point.y - longPressStartPoint.y
+            guard deltaX * deltaX + deltaY * deltaY > renderer.fontWidth * renderer.fontWidth else { return }
             hideEditMenu()
             let cell = renderer.metrics.columnAndRow(x: point.x, y: point.y, topRow: topRow, relativeToScroll: true)
             let column = max(0, min(emulator.columns - 1, cell.column))
-            topRow = sel.update(handle: .end, column: column, row: cell.row, rows: emulator.rows,
+            topRow = currentSelection.update(handle: .end, column: column, row: cell.row, rows: emulator.rows,
                                 activeRows: emulator.screen.activeRows,
                                 isAlternateBufferActive: emulator.isAlternateBufferActive,
                                 topRow: topRow, text: emulator.screen)
-            selection = sel
+            selection = currentSelection
             invalidate()
         case .ended:
             if isSelectingText {
@@ -507,9 +440,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
     }
 
-    // MARK: - Scrolling
-
-    /// Port of `sendMouseEventCode()`.
     private func sendMouseEventCode(at point: CGPoint, button: Int, pressed: Bool) {
         guard let emulator = emulator else { return }
         let cell = renderer.metrics.columnAndRow(x: point.x, y: point.y, topRow: topRow, relativeToScroll: false)
@@ -526,7 +456,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         emulator.sendMouseEvent(button, column: x, row: y, pressed: pressed)
     }
 
-    /// Scroll the terminal by a number of rows (negative = up into the history). Port of `doScroll()`.
     func doScroll(rowsDown: Int, at point: CGPoint = .zero) {
         guard let emulator = emulator else { return }
         let up = rowsDown < 0
@@ -536,9 +465,7 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             if emulator.isMouseTrackingActive {
                 sendMouseEventCode(at: point, button: up ? TerminalEmulator.MOUSE_WHEELUP_BUTTON : TerminalEmulator.MOUSE_WHEELDOWN_BUTTON, pressed: true)
             } else if emulator.isAlternateBufferActive {
-                // Send up and down key events for scrolling, which is what some terminals do to make
-                // scroll work in e.g. less, which shifts to the alt screen without mouse handling.
-                handleKeyCode(up ? AndroidKeyEvent.KEYCODE_DPAD_UP : AndroidKeyEvent.KEYCODE_DPAD_DOWN, keyMod: 0)
+                handleKeyCode(up ? AndroidKeyEvent.KEYCODE_DPAD_UP : AndroidKeyEvent.KEYCODE_DPAD_DOWN, keyModifiers: 0)
             } else {
                 topRow = TerminalScrollMath.clampTopRow(topRow + (up ? -1 : 1), rowsInHistory: emulator.screen.activeTranscriptRows)
                 scrolledTranscript = true
@@ -578,20 +505,19 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             stopFling()
             return
         }
-        let dt: CGFloat
+        let elapsed: CGFloat
         if let last = flingLastTimestamp {
-            dt = CGFloat(link.timestamp - last)
+            elapsed = CGFloat(link.timestamp - last)
         } else {
-            dt = CGFloat(link.duration)
+            elapsed = CGFloat(link.duration)
         }
         flingLastTimestamp = link.timestamp
 
-        let result = TerminalScrollMath.rowsForScroll(distanceY: flingVelocity * dt, remainder: flingRemainder,
+        let result = TerminalScrollMath.rowsForScroll(distanceY: flingVelocity * elapsed, remainder: flingRemainder,
                                                       lineHeight: renderer.lineHeight)
         flingRemainder = result.remainder
         var rows = result.rows
         if flingMouseTrackingAtStart {
-            // Like Android, limit the fling to half a screen when sending mouse wheel events.
             let limit = max(1, emulator.rows / 2)
             let remaining = limit - abs(flingRowsScrolled)
             if remaining <= 0 {
@@ -605,7 +531,7 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             doScroll(rowsDown: rows, at: flingPoint)
         }
 
-        flingVelocity = TerminalScrollMath.decayedVelocity(flingVelocity, dt: dt)
+        flingVelocity = TerminalScrollMath.decayedVelocity(flingVelocity, elapsed: elapsed)
         let atLimit = !emulator.isMouseTrackingActive && !emulator.isAlternateBufferActive
             && ((flingVelocity < 0 && topRow <= -emulator.screen.activeTranscriptRows) || (flingVelocity > 0 && topRow >= 0))
         if abs(flingVelocity) < TerminalScrollMath.FLING_MIN_VELOCITY || atLimit {
@@ -614,95 +540,73 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
     }
 
-    // MARK: - Text input (software keyboard)
-
     var hasText: Bool {
-        // Always true so that deleteBackward() is called for the backspace key.
         return true
     }
 
-    /// Text from the software keyboard (or a hardware keyboard for keys we don't handle in
-    /// `pressesBegan`). Port of `sendTextToTerminal()` of the Android `InputConnection`.
     func insertText(_ text: String) {
         guard emulator != nil else { return }
         stopTextSelectionMode()
         for codePointIn in TerminalInput.codePoints(text) {
             var codePoint = codePointIn
-            // Check onKeyDown() for details.
             if client?.readShiftKey() == true {
                 codePoint = TerminalInput.toUpperCase(codePoint)
             }
             let converted = TerminalInput.softKeyboardCodePoint(codePoint)
             inputCodePoint(source: .softKeyboard, codePoint: converted.codePoint,
-                           controlDownFromEvent: converted.ctrlHeld, leftAltDownFromEvent: false)
+                           controlDownFromEvent: converted.controlHeld, leftAltDownFromEvent: false)
         }
     }
 
-    /// The backspace key of the software keyboard. Port of `deleteSurroundingText()`.
     func deleteBackward() {
         onKeyDown(AndroidKeyEvent.KEYCODE_DEL, source: .softKeyboard)
     }
 
-    /// Input a code point. Port of `inputCodePoint()`.
     func inputCodePoint(source: KeyEventSource, codePoint: Int, controlDownFromEvent: Bool, leftAltDownFromEvent: Bool) {
         guard let session = currentSession else { return }
 
-        // Ensure cursor is shown when a key is pressed down like long hold on (arrow) keys.
         emulator?.setCursorBlinkState(true)
 
         let controlDown = controlDownFromEvent || (client?.readControlKey() ?? false)
         let altDown = leftAltDownFromEvent || (client?.readAltKey() ?? false)
 
-        if client?.onCodePoint(codePoint, ctrlDown: controlDown, session: session) == true { return }
+        if client?.onCodePoint(codePoint, controlDown: controlDown, session: session) == true { return }
 
         if let finalCodePoint = TerminalInput.transformCodePoint(codePoint, controlDown: controlDown, source: source) {
-            // If left alt, send escape before the code point to make e.g. Alt+B and Alt+F work in readline:
             session.writeCodePoint(prependEscape: altDown, codePoint: finalCodePoint)
         }
     }
 
-    // MARK: - Key codes
-
-    /// Handle a key with an Android key code from a hardware keyboard or the extra keys.
-    /// Port of `onKeyDown()`.
-    ///
-    /// - Parameters:
-    ///   - keyCode: Android key code.
-    ///   - ctrl, alt, shift, fn: Modifiers of the event itself (hardware keyboard or extra keys macro).
-    ///   - numLock: If num lock is on (always for Apple keyboards).
-    ///   - fallbackCodePoint: Code point to input if `KeyHandler` has no escape sequence for the key
-    ///     (the `KeyEvent.getUnicodeChar()` equivalent).
     @discardableResult
-    func onKeyDown(_ keyCode: Int, ctrl: Bool = false, alt: Bool = false, shift: Bool = false, fn: Bool = false,
+    func onKeyDown(_ keyCode: Int, control: Bool = false, alt: Bool = false, shift: Bool = false, functionKey: Bool = false,
                    numLock: Bool = false, source: KeyEventSource, fallbackCodePoint: Int? = nil) -> Bool {
         guard let session = currentSession, emulator != nil else { return true }
         if isSelectingText {
             stopTextSelectionMode()
         }
 
-        var eventKeyMod = 0
-        if ctrl { eventKeyMod |= KeyHandler.KEYMOD_CTRL }
-        if alt { eventKeyMod |= KeyHandler.KEYMOD_ALT }
-        if shift { eventKeyMod |= KeyHandler.KEYMOD_SHIFT }
-        if client?.onKeyDown(keyCode, keyMod: eventKeyMod, session: session) == true {
+        var eventKeyModifiers = 0
+        if control { eventKeyModifiers |= KeyHandler.KEYMOD_CTRL }
+        if alt { eventKeyModifiers |= KeyHandler.KEYMOD_ALT }
+        if shift { eventKeyModifiers |= KeyHandler.KEYMOD_SHIFT }
+        if client?.onKeyDown(keyCode, keyModifiers: eventKeyModifiers, session: session) == true {
             invalidate()
             return true
         }
 
-        let controlDown = ctrl || (client?.readControlKey() ?? false)
+        let controlDown = control || (client?.readControlKey() ?? false)
         let leftAltDown = alt || (client?.readAltKey() ?? false)
         let shiftDown = shift || (client?.readShiftKey() ?? false)
-        let fnDown = fn || (client?.readFnKey() ?? false)
+        let functionDown = functionKey || (client?.readFunctionKey() ?? false)
 
-        var keyMod = 0
-        if controlDown { keyMod |= KeyHandler.KEYMOD_CTRL }
-        if leftAltDown { keyMod |= KeyHandler.KEYMOD_ALT }
-        if shiftDown { keyMod |= KeyHandler.KEYMOD_SHIFT }
-        if numLock { keyMod |= KeyHandler.KEYMOD_NUM_LOCK }
+        var keyModifiers = 0
+        if controlDown { keyModifiers |= KeyHandler.KEYMOD_CTRL }
+        if leftAltDown { keyModifiers |= KeyHandler.KEYMOD_ALT }
+        if shiftDown { keyModifiers |= KeyHandler.KEYMOD_SHIFT }
+        if numLock { keyModifiers |= KeyHandler.KEYMOD_NUM_LOCK }
 
-        // FN + arrows act like on Apple keyboards (and Android's Generic.kcm fallbacks).
         var effectiveKeyCode = keyCode
-        if fnDown {
+        if functionDown {
             switch keyCode {
             case AndroidKeyEvent.KEYCODE_DPAD_UP: effectiveKeyCode = AndroidKeyEvent.KEYCODE_PAGE_UP
             case AndroidKeyEvent.KEYCODE_DPAD_DOWN: effectiveKeyCode = AndroidKeyEvent.KEYCODE_PAGE_DOWN
@@ -713,7 +617,7 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             }
         }
 
-        if handleKeyCode(effectiveKeyCode, keyMod: keyMod) {
+        if handleKeyCode(effectiveKeyCode, keyModifiers: keyModifiers) {
             return true
         }
 
@@ -725,34 +629,28 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         return false
     }
 
-    /// Input the specified keyCode if applicable and return if the input was consumed.
-    /// Port of `handleKeyCode()`.
     @discardableResult
-    func handleKeyCode(_ keyCode: Int, keyMod: Int) -> Bool {
-        // Ensure cursor is shown when a key is pressed down like long hold on (arrow) keys.
+    func handleKeyCode(_ keyCode: Int, keyModifiers: Int) -> Bool {
         emulator?.setCursorBlinkState(true)
 
-        if handleKeyCodeAction(keyCode, keyMod: keyMod) {
+        if handleKeyCodeAction(keyCode, keyModifiers: keyModifiers) {
             return true
         }
 
-        guard let session = currentSession, let term = session.emulator else { return false }
-        guard let code = KeyHandler.getCode(keyCode: keyCode, keyMode: keyMod,
-                                            cursorApp: term.isCursorKeysApplicationMode,
-                                            keypadApplication: term.isKeypadApplicationMode) else {
+        guard let session = currentSession, let sessionEmulator = session.emulator else { return false }
+        guard let code = KeyHandler.getCode(keyCode: keyCode, keyMode: keyModifiers,
+                                            cursorApp: sessionEmulator.isCursorKeysApplicationMode,
+                                            keypadApplication: sessionEmulator.isKeypadApplicationMode) else {
             return false
         }
         session.write(code)
         return true
     }
 
-    /// Port of `handleKeyCodeAction()`.
-    private func handleKeyCodeAction(_ keyCode: Int, keyMod: Int) -> Bool {
-        let shiftDown = (keyMod & KeyHandler.KEYMOD_SHIFT) != 0
+    private func handleKeyCodeAction(_ keyCode: Int, keyModifiers: Int) -> Bool {
+        let shiftDown = (keyModifiers & KeyHandler.KEYMOD_SHIFT) != 0
         switch keyCode {
         case AndroidKeyEvent.KEYCODE_PAGE_UP, AndroidKeyEvent.KEYCODE_PAGE_DOWN:
-            // shift+page_up and shift+page_down should scroll scrollback history instead of
-            // scrolling command history or changing pages
             if shiftDown, let emulator = emulator {
                 doScroll(rowsDown: keyCode == AndroidKeyEvent.KEYCODE_PAGE_UP ? -emulator.rows : emulator.rows)
                 return true
@@ -762,8 +660,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
         return false
     }
-
-    // MARK: - Hardware keyboard
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var unhandled = Set<UIPress>()
@@ -796,7 +692,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         super.pressesCancelled(pressesEndedUnhandled(presses), with: event)
     }
 
-    /// Stop key repeat for released keys and return the presses we did not handle.
     private func pressesEndedUnhandled(_ presses: Set<UIPress>) -> Set<UIPress> {
         var unhandled = Set<UIPress>()
         for press in presses {
@@ -818,44 +713,36 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         return unhandled
     }
 
-    /// Handle a hardware key press that does not produce plain text: special keys (arrows, escape,
-    /// function keys, ...) and ctrl/left alt combinations. Returns `false` to let the text input
-    /// system handle the key (which then calls `insertText`).
     private func handleHardwareKeyDown(_ key: UIKey) -> Bool {
         guard currentSession != nil, emulator != nil else { return false }
         let usage = key.keyCode.rawValue
         if HardwareKeyMapper.isModifierKey(usage) { return false }
 
         let flags = key.modifierFlags
-        // Leave command shortcuts to the key commands / the system.
         if flags.contains(.command) { return false }
 
-        let ctrl = flags.contains(.control)
+        let control = flags.contains(.control)
         let alt = flags.contains(.alternate)
         let shift = flags.contains(.shift)
-        // Like Android: left alt is sent as escape prefix (meta), right alt is used to compose
-        // characters (e.g. option+L = @ on some layouts).
         let metaAlt = alt && !rightAltDown
 
         if let keyCode = HardwareKeyMapper.androidKeyCode(forHIDUsage: usage) {
-            // Plain return/tab/backspace go through the key code path as well, which gives the same
-            // result as the text input system but also handles modifiers.
-            onKeyDown(keyCode, ctrl: ctrl, alt: alt, shift: shift,
+            onKeyDown(keyCode, control: control, alt: alt, shift: shift,
                       numLock: AndroidKeyEvent.isNumpadKey(keyCode), source: .hardwareKeyboard,
                       fallbackCodePoint: HardwareKeyMapper.fallbackCodePoint(forKeyCode: keyCode))
             return true
         }
 
-        if ctrl || metaAlt {
+        if control || metaAlt {
             let scalars = Array(key.charactersIgnoringModifiers.unicodeScalars)
             guard scalars.count == 1 else { return false }
             var codePoint = Int(scalars[0].value)
-            if shift && !ctrl {
+            if shift && !control {
                 codePoint = TerminalInput.toUpperCase(codePoint)
             }
             stopTextSelectionMode()
             inputCodePoint(source: .hardwareKeyboard, codePoint: codePoint,
-                           controlDownFromEvent: ctrl, leftAltDownFromEvent: metaAlt)
+                           controlDownFromEvent: control, leftAltDownFromEvent: metaAlt)
             return true
         }
         return false
@@ -895,12 +782,24 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
             copy.discoverabilityTitle = "Copy"
             commands.append(copy)
         }
+        if client?.areHardwareKeyboardShortcutsEnabled == true {
+            for shortcut in TerminalShortcut.allCases {
+                let command = UIKeyCommand(input: shortcut.input, modifierFlags: shortcut.modifierFlags,
+                                           action: #selector(performShortcutCommand(_:)))
+                command.discoverabilityTitle = shortcut.title
+                commands.append(command)
+            }
+        }
         return commands
     }
 
-    // MARK: - Cursor blinking
+    @objc private func performShortcutCommand(_ command: UIKeyCommand) {
+        guard let shortcut = TerminalShortcut.allCases.first(where: {
+            $0.input == command.input && $0.modifierFlags == command.modifierFlags
+        }) else { return }
+        client?.performShortcut(shortcut)
+    }
 
-    /// Set terminal cursor blinker rate. Port of `setTerminalCursorBlinkerRate()`.
     @discardableResult
     func setTerminalCursorBlinkerRate(_ blinkRate: Int) -> Bool {
         let result: Bool
@@ -918,25 +817,20 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         return result
     }
 
-    /// Sets whether cursor blinker should be started or stopped. Port of `setTerminalCursorBlinkerState()`.
     func setTerminalCursorBlinkerState(start: Bool, startOnlyIfCursorEnabled: Bool) {
-        // Stop any existing cursor blinker callbacks
         stopTerminalCursorBlinker()
 
         guard let emulator = emulator else { return }
         emulator.setCursorBlinkingEnabled(false)
 
         if start {
-            // If cursor blinker is not enabled or is not valid
             if terminalCursorBlinkerRate < TerminalView.TERMINAL_CURSOR_BLINK_RATE_MIN || terminalCursorBlinkerRate > TerminalView.TERMINAL_CURSOR_BLINK_RATE_MAX {
                 return
             } else if startOnlyIfCursorEnabled && !emulator.isCursorEnabled {
-                // If cursor blinker is to be started only if cursor is enabled
                 return
             }
 
             emulator.setCursorBlinkingEnabled(true)
-            // Initialize with false so that initial blink state is visible after toggling.
             cursorBlinkVisible = false
             toggleCursorBlink()
             let interval = TimeInterval(terminalCursorBlinkerRate) / 1000.0
@@ -948,8 +842,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
 
     private func toggleCursorBlink() {
         guard let emulator = emulator else { return }
-        // Toggle the blink state and then redraw, the renderer checks
-        // TerminalEmulator.shouldCursorBeVisible to decide whether to draw the cursor or not.
         cursorBlinkVisible.toggle()
         emulator.setCursorBlinkState(cursorBlinkVisible)
         setNeedsDisplay()
@@ -960,17 +852,13 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         cursorBlinkTimer = nil
     }
 
-    // MARK: - Text selection
-
     var isSelectingText: Bool { return selection != nil }
 
-    /// The selected text, or nil if not selecting.
     var selectedText: String? {
-        guard let sel = selection, let emulator = emulator else { return nil }
-        return emulator.getSelectedText(x1: sel.x1, y1: sel.y1, x2: sel.x2, y2: sel.y2)
+        guard let currentSelection = selection, let emulator = emulator else { return nil }
+        return emulator.getSelectedText(x1: currentSelection.x1, y1: currentSelection.y1, x2: currentSelection.x2, y2: currentSelection.y2)
     }
 
-    /// Port of `startTextSelectionMode()`.
     func startTextSelectionMode(at point: CGPoint) {
         guard let emulator = emulator else { return }
         if !isFirstResponder {
@@ -984,7 +872,6 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         invalidate()
     }
 
-    /// Port of `stopTextSelectionMode()`.
     func stopTextSelectionMode() {
         if hideTextSelectionCursors(force: false) {
             client?.copyModeChanged(false)
@@ -999,10 +886,8 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         }
     }
 
-    /// Port of `TextSelectionCursorController.hide()`.
     private func hideTextSelectionCursors(force: Bool) -> Bool {
         guard selection != nil else { return false }
-        // Prevent hide calls right after a show call, like long pressing the down key.
         if !force && CACurrentMediaTime() - selectionShowTime < 0.3 {
             return false
         }
@@ -1013,72 +898,66 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         return true
     }
 
-    /// Port of `TextSelectionCursorController.render()`: position the handles at the selection.
     private func updateSelectionHandles() {
-        guard let sel = selection, let emulator = emulator else {
+        guard let currentSelection = selection, let emulator = emulator else {
             startHandle.isHidden = true
             endHandle.isHidden = true
             return
         }
-        let m = renderer.metrics
+        let cellMetrics = renderer.metrics
         let visibleRows = topRow..<(topRow + emulator.rows)
 
-        let startPoint = CGPoint(x: terminalMargins.left + m.pointX(column: sel.x1, columns: emulator.columns),
-                                 y: terminalMargins.top + m.pointY(row: sel.y1 + 1, topRow: topRow))
+        let startPoint = CGPoint(x: terminalMargins.left + cellMetrics.pointX(column: currentSelection.x1, columns: emulator.columns),
+                                 y: terminalMargins.top + cellMetrics.pointY(row: currentSelection.y1 + 1, topRow: topRow))
         startHandle.position(at: startPoint)
-        startHandle.isHidden = !visibleRows.contains(sel.y1) && !startHandle.isDragging
+        startHandle.isHidden = !visibleRows.contains(currentSelection.y1) && !startHandle.isDragging
 
-        let endPoint = CGPoint(x: terminalMargins.left + m.pointX(column: sel.x2 + 1, columns: emulator.columns),
-                               y: terminalMargins.top + m.pointY(row: sel.y2 + 1, topRow: topRow))
+        let endPoint = CGPoint(x: terminalMargins.left + cellMetrics.pointX(column: currentSelection.x2 + 1, columns: emulator.columns),
+                               y: terminalMargins.top + cellMetrics.pointY(row: currentSelection.y2 + 1, topRow: topRow))
         endHandle.position(at: endPoint)
-        endHandle.isHidden = !visibleRows.contains(sel.y2) && !endHandle.isDragging
+        endHandle.isHidden = !visibleRows.contains(currentSelection.y2) && !endHandle.isDragging
 
         let color = tintColor ?? UIColor.systemBlue
         startHandle.handleColor = color
         endHandle.handleColor = color
     }
 
-    /// Port of `TextSelectionCursorController.updatePosition()`.
     private func handleSelectionHandleDrag(_ handle: TextSelectionHandleView, to anchor: CGPoint, state: UIGestureRecognizer.State) {
-        guard var sel = selection, let emulator = emulator else { return }
+        guard var currentSelection = selection, let emulator = emulator else { return }
         if state == .began {
             hideEditMenu()
             return
         }
         let point = contentPoint(anchor)
-        let m = renderer.metrics
-        // The anchor is at the bottom border of the selected line, use the middle of that line.
-        let row = Int(((point.y - m.lineHeight / 2) / m.lineHeight).rounded(.down)) + topRow
-        let border = m.nearestColumnBorder(x: point.x)
+        let cellMetrics = renderer.metrics
+        let row = Int(((point.y - cellMetrics.lineHeight / 2) / cellMetrics.lineHeight).rounded(.down)) + topRow
+        let border = cellMetrics.nearestColumnBorder(x: point.x)
         let isStart = handle === startHandle
         let column = max(0, min(emulator.columns - 1, isStart ? border : border - 1))
-        topRow = sel.update(handle: isStart ? .start : .end, column: column, row: row, rows: emulator.rows,
+        topRow = currentSelection.update(handle: isStart ? .start : .end, column: column, row: row, rows: emulator.rows,
                             activeRows: emulator.screen.activeRows,
                             isAlternateBufferActive: emulator.isAlternateBufferActive,
                             topRow: topRow, text: emulator.screen)
-        selection = sel
+        selection = currentSelection
         invalidate()
         if state == .ended || state == .cancelled {
             showEditMenu()
         }
     }
 
-    // MARK: - Edit menu
-
-    /// The rect of the selection in view coordinates, for positioning the edit menu.
     private var selectionRect: CGRect {
-        guard let sel = selection, let emulator = emulator else {
+        guard let currentSelection = selection, let emulator = emulator else {
             return CGRect(x: bounds.midX, y: bounds.midY, width: 1, height: 1)
         }
-        let m = renderer.metrics
-        var x1 = m.pointX(column: sel.x1, columns: emulator.columns)
-        var x2 = m.pointX(column: sel.x2 + 1, columns: emulator.columns)
-        if sel.y1 != sel.y2 {
+        let cellMetrics = renderer.metrics
+        var x1 = cellMetrics.pointX(column: currentSelection.x1, columns: emulator.columns)
+        var x2 = cellMetrics.pointX(column: currentSelection.x2 + 1, columns: emulator.columns)
+        if currentSelection.y1 != currentSelection.y2 {
             x1 = 0
-            x2 = CGFloat(emulator.columns) * m.cellWidth
+            x2 = CGFloat(emulator.columns) * cellMetrics.cellWidth
         }
-        let y1 = max(0, m.pointY(row: sel.y1, topRow: topRow))
-        let y2 = min(contentSize.height, m.pointY(row: sel.y2 + 1, topRow: topRow))
+        let y1 = max(0, cellMetrics.pointY(row: currentSelection.y1, topRow: topRow))
+        let y2 = min(contentSize.height, cellMetrics.pointY(row: currentSelection.y2 + 1, topRow: topRow))
         return CGRect(x: terminalMargins.left + min(x1, x2), y: terminalMargins.top + y1,
                       width: max(1, abs(x2 - x1)), height: max(1, y2 - y1))
     }
@@ -1144,20 +1023,17 @@ final class TerminalView: UIView, UIKeyInput, UIGestureRecognizerDelegate {
         return false
     }
 
-    /// Copy the selected text. Port of `ACTION_COPY` of the text selection action mode.
     @objc func terminalCopy(_ sender: Any?) {
         guard let text = selectedText, let session = currentSession else { return }
         session.onCopyTextToClipboard(text)
         forceStopTextSelectionMode()
     }
 
-    /// Paste the clipboard. Port of `ACTION_PASTE` of the text selection action mode.
     @objc func terminalPaste(_ sender: Any?) {
         forceStopTextSelectionMode()
         currentSession?.onPasteTextFromClipboard()
     }
 
-    /// Select the whole transcript and screen.
     @objc func terminalSelectAll(_ sender: Any?) {
         guard let emulator = emulator else { return }
         let rowsInHistory = emulator.screen.activeTranscriptRows

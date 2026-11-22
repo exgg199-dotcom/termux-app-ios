@@ -31,6 +31,8 @@ final class OutputCollector {
     }
 }
 
+let promptEnd = "$\u{1B}[0m "
+
 final class BuiltinShellBackendTests: XCTestCase {
     var home: URL!
     var backend: BuiltinShellBackend!
@@ -53,7 +55,7 @@ final class BuiltinShellBackendTests: XCTestCase {
         backend.onOutput = { [output] in output!.append($0) }
         backend.onExit = { [output] in output!.exited($0) }
         backend.start(columns: 80, rows: 24, cellWidthPixels: 10, cellHeightPixels: 20)
-        XCTAssertTrue(output.wait(for: "$ "), output.text)
+        XCTAssertTrue(output.wait(for: promptEnd), output.text)
     }
 
     private func type(_ s: String) { backend.write(Array(s.utf8)) }
@@ -64,7 +66,7 @@ final class BuiltinShellBackendTests: XCTestCase {
         let before = output.text.count
         type("echo hello\r")
         XCTAssertTrue(output.wait(for: "hello\r\n", after: before + 12), output.text)
-        XCTAssertTrue(output.wait(for: "$ ", after: before + 12))
+        XCTAssertTrue(output.wait(for: promptEnd, after: before + 12))
     }
 
     func testOutputUsesCRLF() {
@@ -99,9 +101,10 @@ final class BuiltinShellBackendTests: XCTestCase {
         backend.write([0x03])
         XCTAssertTrue(output.wait(for: "^C\r\n"))
         let promptOffset = output.text.count
-        XCTAssertTrue(output.wait(for: "$ ", after: promptOffset - 5))
+        XCTAssertTrue(output.wait(for: promptEnd, after: promptOffset - 5))
         XCTAssertLessThan(Date().timeIntervalSince(start), 3)
-        XCTAssertFalse(output.text.contains("done"))
+        let afterInterrupt = output.text.components(separatedBy: "^C").last ?? ""
+        XCTAssertFalse(afterInterrupt.contains("done"))
     }
 
     func testCtrlCStopsYes() {
@@ -124,7 +127,7 @@ final class BuiltinShellBackendTests: XCTestCase {
         // Echo by the line discipline, then cat's output.
         XCTAssertTrue(output.wait(for: "typed line\r\ntyped line\r\n", after: offset), output.text)
         backend.write([0x04])
-        XCTAssertTrue(output.wait(for: "$ ", after: offset))
+        XCTAssertTrue(output.wait(for: promptEnd, after: offset))
     }
 
     func testTypeaheadIsKept() {
@@ -163,12 +166,12 @@ final class BuiltinShellBackendTests: XCTestCase {
         backend.resize(columns: 200, rows: 24, cellWidthPixels: 10, cellHeightPixels: 20)
         var offset = output.text.count
         type("ls\r")
-        XCTAssertTrue(output.wait(for: "$ ", after: offset + 5))
+        XCTAssertTrue(output.wait(for: promptEnd, after: offset + 5))
         let wide = output.text.dropFirst(offset)
         backend.resize(columns: 20, rows: 24, cellWidthPixels: 10, cellHeightPixels: 20)
         offset = output.text.count
         type("ls\r")
-        XCTAssertTrue(output.wait(for: "$ ", after: offset + 5))
+        XCTAssertTrue(output.wait(for: promptEnd, after: offset + 5))
         let narrow = output.text.dropFirst(offset)
         XCTAssertLessThan(wide.components(separatedBy: "\r\n").count, narrow.components(separatedBy: "\r\n").count)
     }

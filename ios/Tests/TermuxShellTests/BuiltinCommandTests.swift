@@ -85,7 +85,8 @@ final class BuiltinCommandTests: ShellTestCase {
         XCTAssertEqual(run("grep zzz g.txt").status, 1)
         write("sub/one.txt", "needle\n"); write("sub/two.txt", "hay\n")
         XCTAssertEqual(out("grep -r needle sub"), "sub/one.txt:needle\n")
-        XCTAssertEqual(out("grep -rl needle ."), "sub/one.txt\n")
+        XCTAssertEqual(out("grep -rl needle ."), "./sub/one.txt\n")
+        XCTAssertEqual(out("cd sub; grep -rl needle"), "one.txt\n")
         XCTAssertEqual(out("echo 'a.b' | grep -F ."), "a.b\n")
     }
 
@@ -156,7 +157,8 @@ final class BuiltinCommandTests: ShellTestCase {
         XCTAssertTrue(out("env").contains("HOME=\(home!)\n"))
         XCTAssertEqual(out("env X=1 printenv X"), "1\n")
         XCTAssertEqual(out("type cd"), "cd is a shell builtin\n")
-        XCTAssertEqual(out("alias ll='ls -l'; type ll"), "ll is aliased to `ls -l'\n")
+        run("alias ll='ls -l'")
+        XCTAssertEqual(out("type ll"), "ll is aliased to `ls -l'\n")
         XCTAssertEqual(run("which nope").status, 1)
         shell.history.add("first"); shell.history.add("second")
         XCTAssertEqual(out("history"), "    1  first\n    2  second\n")

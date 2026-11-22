@@ -467,7 +467,7 @@ enum TestCommand {
 enum Printf {
     static func format(_ format: String, _ arguments: [String]) -> String {
         var out = ""
-        var args = arguments[...]
+        var remaining = arguments[...]
         let fmt = Array(format)
         var consumedAny = false
         repeat {
@@ -496,13 +496,13 @@ enum Printf {
                 var spec = "%"
                 while i < fmt.count && "-+ #0".contains(fmt[i]) { spec.append(fmt[i]); i += 1 }
                 while i < fmt.count && (fmt[i].isNumber || fmt[i] == "." || fmt[i] == "*") {
-                    if fmt[i] == "*" { spec += args.isEmpty ? "0" : args.removeFirst(); consumedAny = true } else { spec.append(fmt[i]) }
+                    if fmt[i] == "*" { spec += remaining.isEmpty ? "0" : remaining.removeFirst(); consumedAny = true } else { spec.append(fmt[i]) }
                     i += 1
                 }
                 guard i < fmt.count else { break }
                 let conv = fmt[i]
                 i += 1
-                let arg: String? = args.isEmpty ? nil : args.removeFirst()
+                let arg: String? = remaining.isEmpty ? nil : remaining.removeFirst()
                 if arg != nil { consumedAny = true }
                 switch conv {
                 case "d", "i":
@@ -523,7 +523,7 @@ enum Printf {
                     out += pad(arg ?? "", spec)
                 }
             }
-        } while consumedAny && !args.isEmpty
+        } while consumedAny && !remaining.isEmpty
         return out
     }
 

@@ -1,7 +1,6 @@
 import XCTest
 
 final class JavaPropertiesParserTests: XCTestCase {
-
     func testSeparatorsAndComments() {
         let text = """
         # comment
@@ -15,67 +14,67 @@ final class JavaPropertiesParserTests: XCTestCase {
         g=
         key\\ with\\ spaces = value
         """
-        let props = JavaPropertiesParser.parse(text)
-        XCTAssertEqual(props["a"], "1")
-        XCTAssertEqual(props["b"], "2")
-        XCTAssertEqual(props["c"], "3")
-        XCTAssertEqual(props["d"], "4")
-        XCTAssertEqual(props["e"], "5  ")
-        XCTAssertEqual(props["f"], "")
-        XCTAssertEqual(props["g"], "")
-        XCTAssertEqual(props["key with spaces"], "value")
-        XCTAssertNil(props["# comment"])
-        XCTAssertEqual(props.count, 8)
+        let properties = JavaPropertiesParser.parse(text)
+        XCTAssertEqual(properties["a"], "1")
+        XCTAssertEqual(properties["b"], "2")
+        XCTAssertEqual(properties["c"], "3")
+        XCTAssertEqual(properties["d"], "4")
+        XCTAssertEqual(properties["e"], "5")
+        XCTAssertEqual(JavaPropertiesParser.parse("  e  =  5  ")["e"], "5  ")
+        XCTAssertEqual(properties["f"], "")
+        XCTAssertEqual(properties["g"], "")
+        XCTAssertEqual(properties["key with spaces"], "value")
+        XCTAssertNil(properties["# comment"])
+        XCTAssertEqual(properties.count, 8)
     }
 
     func testLineContinuation() {
         let text = "extra-keys = [['ESC','/'], \\\n      ['TAB','CTRL']]\nnext=1\n"
-        let props = JavaPropertiesParser.parse(text)
-        XCTAssertEqual(props["extra-keys"], "[['ESC','/'], ['TAB','CTRL']]")
-        XCTAssertEqual(props["next"], "1")
+        let properties = JavaPropertiesParser.parse(text)
+        XCTAssertEqual(properties["extra-keys"], "[['ESC','/'], ['TAB','CTRL']]")
+        XCTAssertEqual(properties["next"], "1")
     }
 
     func testEvenBackslashesDoNotContinue() {
-        let props = JavaPropertiesParser.parse("a=x\\\\\nb=y")
-        XCTAssertEqual(props["a"], "x\\")
-        XCTAssertEqual(props["b"], "y")
+        let properties = JavaPropertiesParser.parse("a=x\\\\\nb=y")
+        XCTAssertEqual(properties["a"], "x\\")
+        XCTAssertEqual(properties["b"], "y")
     }
 
     func testEscapes() {
-        let props = JavaPropertiesParser.parse("a=tab\\there\nb=\\u0041\\u00e9\nc=\\:\\=\\#")
-        XCTAssertEqual(props["a"], "tab\there")
-        XCTAssertEqual(props["b"], "Aé")
-        XCTAssertEqual(props["c"], ":=#")
+        let properties = JavaPropertiesParser.parse("a=tab\\there\nb=\\u0041\\u00e9\nc=\\:\\=\\#")
+        XCTAssertEqual(properties["a"], "tab\there")
+        XCTAssertEqual(properties["b"], "Aé")
+        XCTAssertEqual(properties["c"], ":=#")
     }
 
     func testCRLFAndLaterKeysWin() {
-        let props = JavaPropertiesParser.parse("a=1\r\nb=2\ra=3")
-        XCTAssertEqual(props["a"], "3")
-        XCTAssertEqual(props["b"], "2")
+        let properties = JavaPropertiesParser.parse("a=1\r\nb=2\ra=3")
+        XCTAssertEqual(properties["a"], "3")
+        XCTAssertEqual(properties["b"], "2")
     }
 }
 
 final class TermuxPropertiesTests: XCTestCase {
-
     func testDefaults() {
-        let props = TermuxProperties()
-        XCTAssertEqual(props.extraKeys, ExtraKeysInfo.DEFAULT_EXTRA_KEYS)
-        XCTAssertEqual(props.extraKeysStyle, "default")
-        XCTAssertTrue(props.extraKeysTextAllCaps)
-        XCTAssertEqual(props.bellBehaviour, .vibrate)
-        XCTAssertEqual(props.terminalTranscriptRows, 2000)
-        XCTAssertEqual(props.terminalCursorStyle, TermuxProperties.TERMINAL_CURSOR_STYLE_BLOCK)
-        XCTAssertEqual(props.terminalCursorBlinkRate, 0)
-        XCTAssertEqual(props.terminalMarginHorizontal, 3)
-        XCTAssertEqual(props.terminalMarginVertical, 0)
-        XCTAssertEqual(props.terminalToolbarHeightScaleFactor, 1.0)
-        XCTAssertEqual(props.nightMode, "system")
-        XCTAssertFalse(props.fullscreen)
-        XCTAssertFalse(props.hideSoftKeyboardOnStartup)
-        XCTAssertFalse(props.terminalOnclickUrlOpen)
-        XCTAssertEqual(props.softKeyboardToggleBehaviour, .showHide)
-        XCTAssertTrue(props.sessionShortcuts.isEmpty)
-        XCTAssertTrue(props.warnings.isEmpty)
+        let properties = TermuxProperties()
+        XCTAssertEqual(properties.extraKeys, ExtraKeysInfo.DEFAULT_EXTRA_KEYS)
+        XCTAssertEqual(properties.extraKeysStyle, "default")
+        XCTAssertTrue(properties.extraKeysTextAllCaps)
+        XCTAssertEqual(properties.bellBehaviour, .vibrate)
+        XCTAssertEqual(properties.terminalTranscriptRows, 2000)
+        XCTAssertEqual(properties.terminalCursorStyle, TermuxProperties.TERMINAL_CURSOR_STYLE_BLOCK)
+        XCTAssertEqual(properties.terminalCursorBlinkRate, 0)
+        XCTAssertEqual(properties.terminalMarginHorizontal, 3)
+        XCTAssertEqual(properties.terminalMarginVertical, 0)
+        XCTAssertEqual(properties.terminalToolbarHeightScaleFactor, 1.0)
+        XCTAssertEqual(properties.nightMode, "system")
+        XCTAssertFalse(properties.fullscreen)
+        XCTAssertFalse(properties.hideSoftKeyboardOnStartup)
+        XCTAssertFalse(properties.terminalOnclickUrlOpen)
+        XCTAssertEqual(properties.softKeyboardToggleBehaviour, .showHide)
+        XCTAssertTrue(properties.sessionShortcuts.isEmpty)
+        XCTAssertTrue(properties.warnings.isEmpty)
     }
 
     func testDefaultPropertiesFileIsAllCommentedOut() {
@@ -103,31 +102,30 @@ final class TermuxPropertiesTests: XCTestCase {
         shortcut.create-session = ctrl + t
         shortcut.next-session = ctrl+2
         """
-        let props = TermuxProperties(properties: JavaPropertiesParser.parse(text))
-        XCTAssertEqual(props.extraKeys, "[['ESC','TAB'], ['CTRL','ALT']]")
-        XCTAssertEqual(props.extraKeysStyle, "arrows-only")
-        XCTAssertFalse(props.extraKeysTextAllCaps)
-        XCTAssertEqual(props.bellBehaviour, .ignore)
-        XCTAssertEqual(props.terminalTranscriptRows, 10000)
-        XCTAssertEqual(props.terminalCursorStyle, TermuxProperties.TERMINAL_CURSOR_STYLE_BAR)
-        XCTAssertEqual(props.terminalCursorBlinkRate, 600)
-        XCTAssertEqual(props.terminalMarginHorizontal, 10)
-        XCTAssertEqual(props.terminalToolbarHeightScaleFactor, 1.5)
-        XCTAssertEqual(props.nightMode, "true")
-        XCTAssertTrue(props.fullscreen)
-        XCTAssertTrue(props.hideSoftKeyboardOnStartup)
-        XCTAssertTrue(props.terminalOnclickUrlOpen)
-        XCTAssertEqual(props.softKeyboardToggleBehaviour, .enableDisable)
-        XCTAssertEqual(props.sessionShortcuts, [
+        let properties = TermuxProperties(properties: JavaPropertiesParser.parse(text))
+        XCTAssertEqual(properties.extraKeys, "[['ESC','TAB'], ['CTRL','ALT']]")
+        XCTAssertEqual(properties.extraKeysStyle, "arrows-only")
+        XCTAssertFalse(properties.extraKeysTextAllCaps)
+        XCTAssertEqual(properties.bellBehaviour, .ignore)
+        XCTAssertEqual(properties.terminalTranscriptRows, 10000)
+        XCTAssertEqual(properties.terminalCursorStyle, TermuxProperties.TERMINAL_CURSOR_STYLE_BAR)
+        XCTAssertEqual(properties.terminalCursorBlinkRate, 600)
+        XCTAssertEqual(properties.terminalMarginHorizontal, 10)
+        XCTAssertEqual(properties.terminalToolbarHeightScaleFactor, 1.5)
+        XCTAssertEqual(properties.nightMode, "true")
+        XCTAssertTrue(properties.fullscreen)
+        XCTAssertTrue(properties.hideSoftKeyboardOnStartup)
+        XCTAssertTrue(properties.terminalOnclickUrlOpen)
+        XCTAssertEqual(properties.softKeyboardToggleBehaviour, .enableDisable)
+        XCTAssertEqual(properties.sessionShortcuts, [
             SessionShortcut(codePoint: Int(UnicodeScalar("t").value), action: .createSession),
             SessionShortcut(codePoint: Int(UnicodeScalar("2").value), action: .nextSession),
         ])
-        XCTAssertEqual(props.sessionShortcutAction(forCodePoint: Int(UnicodeScalar("T").value)), .createSession)
-        XCTAssertNil(props.sessionShortcutAction(forCodePoint: Int(UnicodeScalar("x").value)))
-        XCTAssertTrue(props.warnings.isEmpty, "\(props.warnings)")
+        XCTAssertEqual(properties.sessionShortcutAction(forCodePoint: Int(UnicodeScalar("T").value)), .createSession)
+        XCTAssertNil(properties.sessionShortcutAction(forCodePoint: Int(UnicodeScalar("x").value)))
+        XCTAssertTrue(properties.warnings.isEmpty, "\(properties.warnings)")
 
-        // The multi line extra-keys value is usable.
-        let info = ExtraKeysInfo.loadWithFallback(extraKeys: props.extraKeys, style: props.extraKeysStyle)
+        let info = ExtraKeysInfo.loadWithFallback(extraKeys: properties.extraKeys, style: properties.extraKeysStyle)
         XCTAssertNil(info.error)
         XCTAssertEqual(info.info?.matrix.map { $0.map { $0.key } }, [["ESC", "TAB"], ["CTRL", "ALT"]])
     }
@@ -144,28 +142,28 @@ final class TermuxPropertiesTests: XCTestCase {
         night-mode = maybe
         shortcut.rename-session = alt + r
         """
-        let props = TermuxProperties(properties: JavaPropertiesParser.parse(text))
-        XCTAssertEqual(props.bellBehaviour, .vibrate)
-        XCTAssertEqual(props.terminalTranscriptRows, 2000)
-        XCTAssertEqual(props.terminalCursorStyle, 0)
-        XCTAssertEqual(props.terminalCursorBlinkRate, 0)
-        XCTAssertEqual(props.terminalMarginHorizontal, 3)
-        XCTAssertEqual(props.terminalToolbarHeightScaleFactor, 1.0)
-        XCTAssertFalse(props.fullscreen)
-        XCTAssertEqual(props.nightMode, "system")
-        XCTAssertTrue(props.sessionShortcuts.isEmpty)
-        XCTAssertEqual(props.warnings.count, 9)
+        let properties = TermuxProperties(properties: JavaPropertiesParser.parse(text))
+        XCTAssertEqual(properties.bellBehaviour, .vibrate)
+        XCTAssertEqual(properties.terminalTranscriptRows, 2000)
+        XCTAssertEqual(properties.terminalCursorStyle, 0)
+        XCTAssertEqual(properties.terminalCursorBlinkRate, 0)
+        XCTAssertEqual(properties.terminalMarginHorizontal, 3)
+        XCTAssertEqual(properties.terminalToolbarHeightScaleFactor, 1.0)
+        XCTAssertFalse(properties.fullscreen)
+        XCTAssertEqual(properties.nightMode, "system")
+        XCTAssertTrue(properties.sessionShortcuts.isEmpty)
+        XCTAssertEqual(properties.warnings.count, 9)
     }
 
     func testNightModeWinsOverUseBlackUI() {
-        let props = TermuxProperties(properties: ["night-mode": "false", "use-black-ui": "true"])
-        XCTAssertEqual(props.nightMode, "false")
+        let properties = TermuxProperties(properties: ["night-mode": "false", "use-black-ui": "true"])
+        XCTAssertEqual(properties.nightMode, "false")
     }
 
     func testEmptyExtraKeysUsesDefault() {
-        let props = TermuxProperties(properties: ["extra-keys": "", "extra-keys-style": ""])
-        XCTAssertEqual(props.extraKeys, TermuxProperties.DEFAULT_IVALUE_EXTRA_KEYS)
-        XCTAssertEqual(props.extraKeysStyle, "default")
+        let properties = TermuxProperties(properties: ["extra-keys": "", "extra-keys-style": ""])
+        XCTAssertEqual(properties.extraKeys, TermuxProperties.DEFAULT_IVALUE_EXTRA_KEYS)
+        XCTAssertEqual(properties.extraKeysStyle, "default")
     }
 
     func testShortcutParsing() {
@@ -188,7 +186,6 @@ final class TermuxPropertiesTests: XCTestCase {
 }
 
 final class BootstrapTests: XCTestCase {
-
     private var documents: URL!
 
     override func setUpWithError() throws {
@@ -224,7 +221,6 @@ final class BootstrapTests: XCTestCase {
         try FileManager.default.createDirectory(at: paths.termuxConfigDirectory2, withIntermediateDirectories: true)
         try Data("fullscreen=true\n".utf8).write(to: paths.secondaryPropertiesFile)
         try Bootstrap.run(paths: paths)
-        // The secondary file exists, so no primary file is created and the secondary one is used.
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.primaryPropertiesFile.path))
         XCTAssertEqual(paths.propertiesFile, paths.secondaryPropertiesFile)
     }
@@ -245,25 +241,24 @@ final class BootstrapTests: XCTestCase {
 }
 
 final class AppPreferencesTests: XCTestCase {
-
     func testFontSize() {
         let suite = "TermuxAppTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        let prefs = AppPreferences(defaults: defaults)
-        XCTAssertEqual(prefs.fontSize, AppPreferences.DEFAULT_FONT_SIZE)
-        prefs.changeFontSize(increase: true)
-        XCTAssertEqual(prefs.fontSize, AppPreferences.DEFAULT_FONT_SIZE + 1)
-        prefs.fontSize = 1000
-        XCTAssertEqual(prefs.fontSize, AppPreferences.MAX_FONT_SIZE)
-        prefs.changeFontSize(increase: true)
-        XCTAssertEqual(prefs.fontSize, AppPreferences.MAX_FONT_SIZE)
-        prefs.fontSize = 0.5
-        XCTAssertEqual(prefs.fontSize, AppPreferences.MIN_FONT_SIZE)
-        XCTAssertEqual(prefs.theme, .system)
-        prefs.theme = .black
-        XCTAssertEqual(prefs.theme, .black)
-        XCTAssertTrue(prefs.bellVibrate)
-        XCTAssertTrue(prefs.softKeyboardEnabled)
+        let preferences = AppPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.fontSize, AppPreferences.DEFAULT_FONT_SIZE)
+        preferences.changeFontSize(increase: true)
+        XCTAssertEqual(preferences.fontSize, AppPreferences.DEFAULT_FONT_SIZE + 1)
+        preferences.fontSize = 1000
+        XCTAssertEqual(preferences.fontSize, AppPreferences.MAX_FONT_SIZE)
+        preferences.changeFontSize(increase: true)
+        XCTAssertEqual(preferences.fontSize, AppPreferences.MAX_FONT_SIZE)
+        preferences.fontSize = 0.5
+        XCTAssertEqual(preferences.fontSize, AppPreferences.MIN_FONT_SIZE)
+        XCTAssertEqual(preferences.theme, .system)
+        preferences.theme = .black
+        XCTAssertEqual(preferences.theme, .black)
+        XCTAssertTrue(preferences.bellVibrate)
+        XCTAssertTrue(preferences.softKeyboardEnabled)
     }
 }

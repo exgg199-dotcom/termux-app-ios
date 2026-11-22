@@ -1,7 +1,6 @@
 import XCTest
 
 final class ExtraKeysTests: XCTestCase {
-
     func testDefaultExtraKeys() throws {
         let info = try ExtraKeysInfo(propertiesInfo: ExtraKeysInfo.DEFAULT_EXTRA_KEYS, style: "default")
         XCTAssertEqual(info.matrix.count, 2)
@@ -9,13 +8,11 @@ final class ExtraKeysTests: XCTestCase {
         XCTAssertEqual(info.matrix[1].map { $0.key }, ["TAB", "CTRL", "ALT", "LEFT", "DOWN", "RIGHT", "PGDN"])
         XCTAssertEqual(info.maximumRowLength, 7)
 
-        // Display names from the default style.
         XCTAssertEqual(info.matrix[0][4].display, "↑")
         XCTAssertEqual(info.matrix[0][2].display, "―")
         XCTAssertEqual(info.matrix[0][0].display, "ESC")
         XCTAssertEqual(info.matrix[1][0].display, "↹")
 
-        // Popup on the '-' key.
         XCTAssertEqual(info.matrix[0][2].popup?.key, "|")
         XCTAssertNil(info.matrix[0][0].popup)
         XCTAssertFalse(info.matrix[0][0].isMacro)
@@ -37,7 +34,6 @@ final class ExtraKeysTests: XCTestCase {
     func testAliases() throws {
         let info = try ExtraKeysInfo(propertiesInfo: "[[ESCAPE, CONTROL, LT, 'PAGE UP', BACKSLASH, QUOTE, APOSTROPHE, RETURN]]", style: "none")
         XCTAssertEqual(info.matrix[0].map { $0.key }, ["ESC", "CTRL", "LEFT", "PGUP", "\\", "\"", "'", "ENTER"])
-        // Style "none" displays the key names themselves.
         XCTAssertEqual(info.matrix[0][2].display, "LEFT")
     }
 
@@ -127,7 +123,6 @@ final class ExtraKeysTests: XCTestCase {
 }
 
 final class SpecialButtonTests: XCTestCase {
-
     private func makeMachine() -> SpecialButtonsStateMachine {
         let machine = SpecialButtonsStateMachine()
         for button in SpecialButton.defaultButtons {
@@ -141,7 +136,6 @@ final class SpecialButtonTests: XCTestCase {
         XCTAssertEqual(machine.read(.CTRL, autoSetInactive: true), false)
         machine.tap(.CTRL, at: 0)
         XCTAssertEqual(machine.read(.CTRL, autoSetInactive: true), true)
-        // Consumed by the read.
         XCTAssertEqual(machine.read(.CTRL, autoSetInactive: true), false)
     }
 
@@ -167,7 +161,6 @@ final class SpecialButtonTests: XCTestCase {
         XCTAssertEqual(machine.state(for: .CTRL)?.isLocked, true)
         XCTAssertEqual(machine.read(.CTRL, autoSetInactive: true), true)
         XCTAssertEqual(machine.read(.CTRL, autoSetInactive: true), true)
-        // Tapping again unlocks and deactivates.
         machine.tap(.CTRL, at: 5)
         XCTAssertEqual(machine.state(for: .CTRL)?.isLocked, false)
         XCTAssertEqual(machine.read(.CTRL, autoSetInactive: true), false)

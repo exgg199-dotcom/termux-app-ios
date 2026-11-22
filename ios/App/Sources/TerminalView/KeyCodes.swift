@@ -1,10 +1,5 @@
 import Foundation
 
-/// The Android `android.view.KeyEvent.KEYCODE_*` values that `KeyHandler.getCode(...)` of the
-/// ported terminal emulator understands. iOS has no such key codes, so hardware keyboard keys
-/// (USB HID usages reported by `UIKey.keyCode`) and the extra keys are mapped to these.
-///
-/// UIKit-free so that it can be unit tested on any platform.
 public enum AndroidKeyEvent {
     public static let KEYCODE_UNKNOWN = 0
     public static let KEYCODE_HOME = 3
@@ -59,18 +54,12 @@ public enum AndroidKeyEvent {
     public static let KEYCODE_NUMPAD_ENTER = 160
     public static let KEYCODE_NUMPAD_EQUALS = 161
 
-    /// If the key code is one of the numeric keypad keys (for which NUM_LOCK is assumed on, since
-    /// Apple keyboards have no num lock).
     public static func isNumpadKey(_ keyCode: Int) -> Bool {
         return keyCode >= KEYCODE_NUMPAD_0 && keyCode <= KEYCODE_NUMPAD_EQUALS
     }
 }
 
-/// Maps USB HID keyboard usages (the raw values of `UIKeyboardHIDUsage`, reported by
-/// `UIKey.keyCode`) to Android key codes.
 public enum HardwareKeyMapper {
-
-    // HID usage IDs (USB HID Usage Tables, Keyboard/Keypad page 0x07).
     public static let HID_RETURN = 0x28
     public static let HID_ESCAPE = 0x29
     public static let HID_BACKSPACE = 0x2A
@@ -112,8 +101,6 @@ public enum HardwareKeyMapper {
     public static let HID_RIGHT_ALT = 0xE6
     public static let HID_RIGHT_GUI = 0xE7
 
-    /// Returns the Android key code for a HID usage, or `nil` if the key produces normal text that
-    /// should go through the text input system (letters, digits, punctuation, space).
     public static func androidKeyCode(forHIDUsage usage: Int) -> Int? {
         switch usage {
         case HID_RETURN: return AndroidKeyEvent.KEYCODE_ENTER
@@ -148,13 +135,10 @@ public enum HardwareKeyMapper {
         }
     }
 
-    /// If the HID usage is a modifier key itself (ctrl, shift, alt/option, gui/command).
     public static func isModifierKey(_ usage: Int) -> Bool {
         return usage >= HID_LEFT_CONTROL && usage <= HID_RIGHT_GUI
     }
 
-    /// The code point that a key with an Android key code produces if `KeyHandler.getCode()`
-    /// returns no escape sequence for it, i.e. the `KeyEvent.getUnicodeChar()` equivalent.
     public static func fallbackCodePoint(forKeyCode keyCode: Int) -> Int? {
         switch keyCode {
         case AndroidKeyEvent.KEYCODE_SPACE: return 32

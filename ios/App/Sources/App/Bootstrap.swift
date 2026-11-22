@@ -1,14 +1,6 @@
 import Foundation
 
-/// First launch setup of the Termux home directory. The iOS counterpart of `TermuxInstaller`:
-/// there is no bootstrap zip with packages to extract, only the home directory and the default
-/// configuration files are created.
-///
-/// UIKit-free so that it can be unit tested on any platform.
 public enum Bootstrap {
-
-    /// Create `$HOME`, `~/.termux` and a commented default `termux.properties` if missing.
-    /// Existing files are never overwritten.
     public static func run(paths: TermuxPaths, fileManager: FileManager = .default) throws {
         try fileManager.createDirectory(at: paths.homeDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.termuxConfigDirectory, withIntermediateDirectories: true)
@@ -25,8 +17,6 @@ public enum Bootstrap {
         }
     }
 
-    /// The message of the day printed at the start of every session, unless `~/.hushlogin` exists.
-    /// `~/.termux/motd` replaces the built-in text if it exists.
     public static func motd(paths: TermuxPaths, fileManager: FileManager = .default) -> String? {
         if fileManager.fileExists(atPath: paths.hushLoginFile.path) {
             return nil
@@ -37,7 +27,6 @@ public enum Bootstrap {
         return defaultMotd
     }
 
-    /// Convert "\n" line endings to "\r\n" so that text can be fed directly to the terminal emulator.
     public static func terminalText(_ text: String) -> String {
         return text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n")
     }
@@ -59,7 +48,6 @@ public enum Bootstrap {
     (or via the Settings button in the sessions drawer).
     Swipe from the left edge for the sessions drawer.
 
-
     """
 
     public static let documentsReadme = """
@@ -75,7 +63,6 @@ public enum Bootstrap {
 
     """
 
-    /// The default `~/.termux/termux.properties`, with all supported properties commented out.
     public static let defaultTermuxProperties = """
     ### This is the Termux for iOS configuration file.
     ### Lines starting with # are comments. Uncomment a property and change its value
@@ -84,7 +71,6 @@ public enum Bootstrap {
     ### After making changes and saving, the settings are reloaded automatically
     ### (they are also reloaded when the app returns to the foreground, or with the
     ### "Reload settings" button in Settings).
-
 
     ###############
     # Extra keys
@@ -125,7 +111,6 @@ public enum Bootstrap {
     ### Height of the extra keys rows relative to the default (0.4 - 3.0)
     # terminal-toolbar-height = 1.0
 
-
     ###############
     # Terminal
     ###############
@@ -154,7 +139,6 @@ public enum Bootstrap {
     ###   foreground=#ffffff
     ###   color1=#cd0000
     ### A custom monospace font can be installed as ~/.termux/font.ttf
-
 
     ###############
     # App

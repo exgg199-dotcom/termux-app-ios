@@ -1,16 +1,8 @@
 import UIKit
 
-/// A draggable text selection handle. Port of `com.termux.view.textselection.TextSelectionHandleView`.
-///
-/// The handle is drawn below the selected line: a stem at the selection border and a knob below it.
-/// The view's `anchorPoint` (in the terminal view's coordinates) is the top of the stem, i.e. the
-/// bottom border of the selected cell, and is what `TerminalView` positions.
 final class TextSelectionHandleView: UIView {
-
     enum Orientation {
-        /// The start of the selection; the stem is at the left border of the first selected cell.
         case left
-        /// The end of the selection; the stem is at the right border of the last selected cell.
         case right
     }
 
@@ -22,7 +14,6 @@ final class TextSelectionHandleView: UIView {
         didSet { setNeedsDisplay() }
     }
 
-    /// Called while dragging with the new anchor point in the superview's coordinates.
     var onDrag: ((TextSelectionHandleView, CGPoint, UIGestureRecognizer.State) -> Void)?
 
     private(set) var isDragging = false
@@ -45,31 +36,26 @@ final class TextSelectionHandleView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// The point (in superview coordinates) the handle points at.
     var anchorPoint: CGPoint {
-        // The stem is at the horizontal center of the view, its top at the top of the view.
         return CGPoint(x: frame.midX, y: frame.minY)
     }
 
-    /// Port of `positionAtCursor()`: move the handle so that it points at the given position.
     func position(at point: CGPoint) {
         frame.origin = CGPoint(x: point.x - bounds.width / 2, y: point.y)
     }
 
     override func draw(_ rect: CGRect) {
-        guard let ctx = UIGraphicsGetCurrentContext() else { return }
-        let d = TextSelectionHandleView.knobDiameter
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        let diameter = TextSelectionHandleView.knobDiameter
         let stemX = bounds.midX
-        ctx.setFillColor(handleColor.cgColor)
-        // Stem
-        ctx.fill(CGRect(x: stemX - 1, y: 0, width: 2, height: d / 2))
-        // Knob: offset to the outside of the selection like Android's teardrop handles.
-        let knobX = orientation == .left ? stemX - d + 2 : stemX - 2
-        ctx.fillEllipse(in: CGRect(x: knobX, y: d / 3, width: d, height: d))
+        context.setFillColor(handleColor.cgColor)
+        context.fill(CGRect(x: stemX - 1, y: 0, width: 2, height: diameter / 2))
+        let knobX = orientation == .left ? stemX - diameter + 2 : stemX - 2
+        context.fillEllipse(in: CGRect(x: knobX, y: diameter / 3, width: diameter, height: diameter))
         let corner = orientation == .left
-            ? CGRect(x: stemX - d / 2, y: d / 3, width: d / 2, height: d / 2)
-            : CGRect(x: stemX, y: d / 3, width: d / 2, height: d / 2)
-        ctx.fill(corner)
+            ? CGRect(x: stemX - diameter / 2, y: diameter / 3, width: diameter / 2, height: diameter / 2)
+            : CGRect(x: stemX, y: diameter / 3, width: diameter / 2, height: diameter / 2)
+        context.fill(corner)
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {

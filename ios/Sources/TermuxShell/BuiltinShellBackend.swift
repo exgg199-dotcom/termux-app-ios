@@ -77,8 +77,8 @@ public final class BuiltinShellBackend: TerminalBackend {
             if showsWelcome && !fm.fileExists(atPath: home + "/.hushlogin") {
                 io.stdout.write(BuiltinShellBackend.welcome)
             }
-            for rc in [".profile", ".shrc"] {
-                let path = home + "/" + rc
+            for startupFile in [".profile", ".shrc"] {
+                let path = home + "/" + startupFile
                 if fm.fileExists(atPath: path) && interpreter.exitRequested == nil {
                     _ = interpreter.source(file: path, arguments: [], io: io, cancellation: token)
                 }

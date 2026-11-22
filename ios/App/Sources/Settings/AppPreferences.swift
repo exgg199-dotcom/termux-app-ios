@@ -1,13 +1,9 @@
 import Foundation
 
-/// The UI theme of the app chrome (drawer, extra keys, settings). The terminal colors themselves
-/// come from `~/.termux/colors.properties`.
 public enum AppTheme: String, CaseIterable {
-    /// Follow `night-mode` in termux.properties, which defaults to the system appearance.
     case system
     case light
     case dark
-    /// Dark with pure black backgrounds (`use-black-ui`).
     case black
 
     public var displayName: String {
@@ -20,14 +16,10 @@ public enum AppTheme: String, CaseIterable {
     }
 }
 
-/// App preferences stored in `UserDefaults`. Port of the relevant parts of
-/// `TermuxAppSharedPreferences` (font size, soft keyboard enabled) plus iOS specific settings.
 public final class AppPreferences {
-
     public static let MIN_FONT_SIZE: Double = 6
     public static let MAX_FONT_SIZE: Double = 40
     public static let DEFAULT_FONT_SIZE: Double = 12
-    /// The step used by pinch zoom and the font size shortcuts.
     public static let FONT_SIZE_STEP: Double = 1
 
     private enum Keys {
@@ -43,7 +35,6 @@ public final class AppPreferences {
         self.defaults = defaults
     }
 
-    /// Terminal font size in points.
     public var fontSize: Double {
         get {
             let value = defaults.double(forKey: Keys.fontSize)
@@ -56,7 +47,6 @@ public final class AppPreferences {
         return min(MAX_FONT_SIZE, max(MIN_FONT_SIZE, size))
     }
 
-    /// Port of `TermuxAppSharedPreferences.changeFontSize()`.
     @discardableResult
     public func changeFontSize(increase: Bool) -> Double {
         let newSize = AppPreferences.clampFontSize(fontSize + (increase ? 1 : -1) * AppPreferences.FONT_SIZE_STEP)
@@ -69,13 +59,11 @@ public final class AppPreferences {
         set { defaults.set(newValue.rawValue, forKey: Keys.theme) }
     }
 
-    /// Haptic feedback for the bell character (when `bell-character=vibrate`).
     public var bellVibrate: Bool {
         get { return defaults.object(forKey: Keys.bellVibrate) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Keys.bellVibrate) }
     }
 
-    /// If the soft keyboard is enabled (toggled with the KEYBOARD extra key / drawer button).
     public var softKeyboardEnabled: Bool {
         get { return defaults.object(forKey: Keys.softKeyboardEnabled) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Keys.softKeyboardEnabled) }

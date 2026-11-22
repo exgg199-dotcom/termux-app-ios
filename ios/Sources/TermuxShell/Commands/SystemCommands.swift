@@ -126,7 +126,7 @@ enum SystemCommands {
         if ctx.args.count == 2, let m = Int(ctx.args[0]), let y = Int(ctx.args[1]) { comps.month = m; comps.year = y }
         else if ctx.args.count == 1, let y = Int(ctx.args[0]), y > 12 {
             for m in 1...12 {
-                let sub = CommandContext(arguments: ["cal", String(m), String(y)], stdin: ctx.stdin, stdout: ctx.stdout, stderr: ctx.stderr,
+                let sub = CommandContext(argumentVector: ["cal", String(m), String(y)], stdin: ctx.stdin, stdout: ctx.stdout, stderr: ctx.stderr,
                                          shell: ctx.shell, cancellation: ctx.cancellation, environment: ctx.environment,
                                          currentDirectory: ctx.currentDirectory)
                 _ = SystemCommands.cal(sub); ctx.print()

@@ -226,14 +226,14 @@ enum TextCommands {
             if let info = FileInfo(path: path, follow: true), info.isDirectory {
                 if !recursive { if !opts.has("s") { ctx.error("\(op): Is a directory") }; continue }
                 if let en = FileManager.default.enumerator(atPath: path) {
-                    var sub: [String] = []
+                    var found: [String] = []
                     while let rel = en.nextObject() as? String {
                         let full = path + "/" + rel
                         if FileInfo(path: full, follow: false)?.isRegular == true {
-                            sub.append(op == "." && !ctx.args.contains(".") ? rel : (op.hasSuffix("/") ? op + rel : op + "/" + rel))
+                            found.append(op == "." && !ctx.args.contains(".") ? rel : (op.hasSuffix("/") ? op + rel : op + "/" + rel))
                         }
                     }
-                    files.append(contentsOf: sub.sorted())
+                    files.append(contentsOf: found.sorted())
                 }
             } else {
                 files.append(op)
