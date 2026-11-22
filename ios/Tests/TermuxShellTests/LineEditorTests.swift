@@ -63,7 +63,6 @@ final class LineEditorTests: XCTestCase {
         XCTAssertEqual(left.outputString, "\u{8}")
         XCTAssertEqual(editor.cursor, 1)
         let ins = feed("b")
-        // Redraw the line and move the cursor back after "ab".
         XCTAssertTrue(ins.outputString.contains("$ abc"), ins.outputString)
         XCTAssertTrue(ins.outputString.hasSuffix("\u{8}"), ins.outputString)
         XCTAssertEqual(editor.line, "abc")
@@ -73,7 +72,7 @@ final class LineEditorTests: XCTestCase {
         XCTAssertEqual(editor.cursor, 3)
     }
 
-    func testHomeEndAndCtrlAE() {
+    func testHomeEndAndControlAE() {
         _ = feed("hello")
         _ = feed("\u{1B}[H")
         XCTAssertEqual(editor.cursor, 0)
@@ -97,7 +96,7 @@ final class LineEditorTests: XCTestCase {
         XCTAssertEqual(editor.cursor, 0)
     }
 
-    func testCtrlUAndCtrlWAndCtrlK() {
+    func testControlUAndControlWAndControlK() {
         _ = feed("echo foo bar")
         _ = editor.feed([0x17])
         XCTAssertEqual(editor.line, "echo foo ")
@@ -109,18 +108,18 @@ final class LineEditorTests: XCTestCase {
         _ = feed("\u{1B}[D\u{1B}[D")
         _ = editor.feed([0x0B])
         XCTAssertEqual(editor.line, "abcd")
-        _ = editor.feed([0x19]) // yank
+        _ = editor.feed([0x19])
         XCTAssertEqual(editor.line, "abcdef")
     }
 
-    func testCtrlC() {
+    func testControlC() {
         _ = feed("partial")
         let r = editor.feed([0x03])
         XCTAssertEqual(r.event, .interrupt)
         XCTAssertEqual(r.outputString, "^C\r\n")
     }
 
-    func testCtrlD() {
+    func testControlD() {
         XCTAssertEqual(editor.feed([0x04]).event, .endOfFile)
         _ = editor.begin(prompt: "$ ")
         _ = feed("ab")
@@ -130,7 +129,7 @@ final class LineEditorTests: XCTestCase {
         XCTAssertEqual(editor.line, "b")
     }
 
-    func testCtrlLClears() {
+    func testControlLClears() {
         _ = feed("x")
         let r = editor.feed([0x0C])
         XCTAssertTrue(r.outputString.hasPrefix("\u{1B}[H\u{1B}[2J"))
@@ -157,7 +156,6 @@ final class LineEditorTests: XCTestCase {
 
     func testUTF8MultiByteInput() {
         let bytes = Array("héllo €𝄞".utf8)
-        // Feed one byte at a time to exercise the decoder.
         var output: [UInt8] = []
         for b in bytes { output += editor.feed([b]).output }
         XCTAssertEqual(editor.line, "héllo €𝄞")
@@ -190,10 +188,9 @@ final class LineEditorTests: XCTestCase {
         editor.columns = 10
         _ = editor.begin(prompt: "$ ")
         let r = feed("12345678")
-        // Prompt (2) + 8 chars fills the row exactly: the editor must move to the next row.
         XCTAssertTrue(r.outputString.hasSuffix("8\r\n"), r.outputString)
         _ = feed("9")
-        _ = editor.feed([0x01]) // go to start: one row up
+        _ = editor.feed([0x01])
         XCTAssertEqual(editor.cursor, 0)
         let end = editor.feed([0x05])
         XCTAssertEqual(end.outputString, "\u{1B}[1B\r\u{1B}[1C")

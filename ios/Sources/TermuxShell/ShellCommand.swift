@@ -1,22 +1,15 @@
 import Foundation
 
-/// A command that can be run by the built-in shell.
-///
-/// Add new commands by conforming to this protocol and registering them with
-/// `CommandRegistry.register(_:)`.
 public protocol ShellCommand {
     var name: String { get }
-    /// One-line description shown by `help`.
     var summary: String { get }
-    /// Runs the command. Returns the exit status.
-    func run(_ ctx: CommandContext) -> Int32
+    func run(_ context: CommandContext) -> Int32
 }
 
 public extension ShellCommand {
     var summary: String { "" }
 }
 
-/// A `ShellCommand` backed by a closure.
 public struct ClosureCommand: ShellCommand {
     public let name: String
     public let summary: String
@@ -24,10 +17,9 @@ public struct ClosureCommand: ShellCommand {
     public init(_ name: String, _ summary: String = "", _ body: @escaping (CommandContext) -> Int32) {
         self.name = name; self.summary = summary; self.body = body
     }
-    public func run(_ ctx: CommandContext) -> Int32 { body(ctx) }
+    public func run(_ context: CommandContext) -> Int32 { body(context) }
 }
 
-/// Thread safe name → command table.
 public final class CommandRegistry {
     private let lock = NSLock()
     private var commands: [String: ShellCommand] = [:]
@@ -42,10 +34,9 @@ public final class CommandRegistry {
         register(ClosureCommand(name, summary, body))
     }
 
-    /// Registers `alias` as another name of an existing command.
     public func alias(_ alias: String, to name: String) {
-        guard let cmd = command(named: name) else { return }
-        register(ClosureCommand(alias, cmd.summary) { cmd.run($0) })
+        guard let command = command(named: name) else { return }
+        register(ClosureCommand(alias, command.summary) { command.run($0) })
     }
 
     public func unregister(_ name: String) { lock.lock(); commands[name] = nil; lock.unlock() }
@@ -65,7 +56,6 @@ public final class CommandRegistry {
         return commands.keys.sorted().compactMap { commands[$0] }
     }
 
-    /// A registry with all standard built-in commands.
     public static func standard() -> CommandRegistry {
         let r = CommandRegistry()
         ShellBuiltins.registerShellCommands(r)
@@ -77,18 +67,14 @@ public final class CommandRegistry {
     }
 }
 
-/// Everything a running command can access.
 public final class CommandContext {
-    /// Full argument vector; `arguments[0]` is the command name.
     public let argumentVector: [String]
     public let stdin: ShellInputStream
     public let stdout: ShellOutputStream
     public let stderr: ShellOutputStream
     public let shell: ShellInterpreter
     public let cancellation: CancellationToken
-    /// Environment for this command (shell variables plus per-command assignments).
     public let environment: [String: String]
-    /// Working directory at the time the command started.
     public let currentDirectory: String
 
     public init(argumentVector: [String], stdin: ShellInputStream, stdout: ShellOutputStream, stderr: ShellOutputStream,
@@ -99,40 +85,34 @@ public final class CommandContext {
     }
 
     public var name: String { argumentVector.first ?? "" }
-    /// Arguments without the command name.
-    public var args: [String] { Array(argumentVector.dropFirst()) }
+    public var arguments: [String] { Array(argumentVector.dropFirst()) }
     public var isCancelled: Bool { cancellation.isCancelled }
-    /// True if the command should stop producing output (cancelled or reader gone).
     public var shouldStop: Bool { cancellation.isCancelled || stdout.isClosed }
     public var terminalColumns: Int { shell.terminalColumns }
     public var homeDirectory: String { shell.homeDirectory }
 
-    /// Resolves a path relative to the command's working directory.
     public func resolve(_ path: String) -> String {
         ShellPath.resolve(path, relativeTo: currentDirectory)
     }
 
-    /// Writes `name: message` to stderr.
     public func error(_ message: String) {
         stderr.writeLine("\(name): \(message)")
     }
 
     public func print(_ s: String = "") { stdout.writeLine(s) }
 
-    /// Opens a named file for reading ("-" means stdin). Prints an error and returns nil on failure.
     public func openInput(_ path: String) -> ShellInputStream? {
         if path == "-" { return stdin }
         let full = resolve(path)
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: full, isDirectory: &isDir) else {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: full, isDirectory: &isDirectory) else {
             error("\(path): No such file or directory"); return nil
         }
-        if isDir.boolValue { error("\(path): Is a directory"); return nil }
+        if isDirectory.boolValue { error("\(path): Is a directory"); return nil }
         guard let s = FileInputStream(path: full) else { error("\(path): Permission denied"); return nil }
         return s
     }
 
-    /// Calls `body` for each input (files or stdin if `files` is empty). Returns 1 if any failed.
     public func forEachInput(_ files: [String], _ body: (ShellInputStream, String) -> Void) -> Int32 {
         if files.isEmpty { body(stdin, "-"); return 0 }
         var status: Int32 = 0
@@ -146,7 +126,6 @@ public final class CommandContext {
     }
 }
 
-/// Lock-protected mutable box for passing results between threads.
 final class LockedBox<T> {
     private let lock = NSLock()
     private var stored: T
@@ -158,10 +137,6 @@ final class LockedBox<T> {
     func mutate(_ body: (inout T) -> Void) { lock.lock(); body(&stored); lock.unlock() }
 }
 
-// MARK: - Option parsing
-
-/// Minimal getopt-style parser supporting combined short flags (`-rf`), flags with values
-/// (`-n 5`, `-n5`), long options (`--name`, `--name=value`) and `--`.
 public struct ParsedOptions {
     public var flags: Set<Character> = []
     public var values: [Character: String] = [:]
@@ -173,11 +148,11 @@ public struct ParsedOptions {
     public func has(_ c: Character) -> Bool { flags.contains(c) }
     public func value(_ c: Character) -> String? { values[c] }
 
-    public init(_ args: [String], flags allowed: String, withValues: String = "", longFlags allowedLong: Set<String> = []) {
+    public init(_ arguments: [String], flags allowed: String, withValues: String = "", longFlags allowedLong: Set<String> = []) {
         var i = 0
         var onlyOperands = false
-        while i < args.count {
-            let a = args[i]
+        while i < arguments.count {
+            let a = arguments[i]
             i += 1
             if onlyOperands || a == "-" || !a.hasPrefix("-") { operands.append(a); continue }
             if a == "--" { onlyOperands = true; continue }
@@ -199,7 +174,7 @@ public struct ParsedOptions {
                 if withValues.contains(c) {
                     let rest = String(chars[(k + 1)...])
                     if !rest.isEmpty { values[c] = rest }
-                    else if i < args.count { values[c] = args[i]; i += 1 }
+                    else if i < arguments.count { values[c] = arguments[i]; i += 1 }
                     else { error = "option requires an argument -- '\(c)'" }
                     break
                 } else if allowed.contains(c) {
@@ -213,26 +188,22 @@ public struct ParsedOptions {
     }
 }
 
-// MARK: - Paths
-
 public enum ShellPath {
-    /// Joins `path` to `base` unless absolute, then normalizes `.` and `..` (lexically).
     public static func resolve(_ path: String, relativeTo base: String) -> String {
         let full = path.hasPrefix("/") ? path : (base.hasSuffix("/") ? base + path : base + "/" + path)
         return normalize(full)
     }
 
     public static func normalize(_ path: String) -> String {
-        var comps: [Substring] = []
+        var components: [Substring] = []
         for c in path.split(separator: "/", omittingEmptySubsequences: true) {
             if c == "." { continue }
-            if c == ".." { if !comps.isEmpty { comps.removeLast() }; continue }
-            comps.append(c)
+            if c == ".." { if !components.isEmpty { components.removeLast() }; continue }
+            components.append(c)
         }
-        return "/" + comps.joined(separator: "/")
+        return "/" + components.joined(separator: "/")
     }
 
-    /// Replaces a leading home directory with `~`.
     public static func abbreviate(_ path: String, home: String) -> String {
         let h = normalize(home)
         if path == h { return "~" }
@@ -244,30 +215,28 @@ public enum ShellPath {
         if path == "/" { return "/" }
         var p = path
         while p.count > 1 && p.hasSuffix("/") { p.removeLast() }
-        if let idx = p.lastIndex(of: "/") { return String(p[p.index(after: idx)...]) }
+        if let index = p.lastIndex(of: "/") { return String(p[p.index(after: index)...]) }
         return p
     }
 
     public static func dirname(_ path: String) -> String {
         var p = path
         while p.count > 1 && p.hasSuffix("/") { p.removeLast() }
-        guard let idx = p.lastIndex(of: "/") else { return "." }
-        if idx == p.startIndex { return "/" }
-        var d = String(p[..<idx])
+        guard let index = p.lastIndex(of: "/") else { return "." }
+        if index == p.startIndex { return "/" }
+        var d = String(p[..<index])
         while d.count > 1 && d.hasSuffix("/") { d.removeLast() }
         return d
     }
 }
-
-// MARK: - File info
 
 public struct FileInfo {
     public let path: String
     public let mode: UInt32
     public let size: Int64
     public let linkCount: Int
-    public let uid: UInt32
-    public let gid: UInt32
+    public let userIdentifier: UInt32
+    public let groupIdentifier: UInt32
     public let modificationDate: Date
 
     public var isDirectory: Bool { (mode & UInt32(S_IFMT)) == UInt32(S_IFDIR) }
@@ -276,21 +245,20 @@ public struct FileInfo {
     public var isExecutable: Bool { !isDirectory && (mode & 0o111) != 0 }
     public var permissions: UInt32 { mode & 0o7777 }
 
-    /// lstat() the path (does not follow symlinks unless `follow`).
     public init?(path: String, follow: Bool = false) {
-        var st = stat()
-        let rc = follow ? stat(path, &st) : lstat(path, &st)
-        guard rc == 0 else { return nil }
+        var fileStatus = stat()
+        let result = follow ? stat(path, &fileStatus) : lstat(path, &fileStatus)
+        guard result == 0 else { return nil }
         self.path = path
-        mode = UInt32(st.st_mode)
-        size = Int64(st.st_size)
-        linkCount = Int(st.st_nlink)
-        uid = UInt32(st.st_uid)
-        gid = UInt32(st.st_gid)
+        mode = UInt32(fileStatus.st_mode)
+        size = Int64(fileStatus.st_size)
+        linkCount = Int(fileStatus.st_nlink)
+        userIdentifier = UInt32(fileStatus.st_uid)
+        groupIdentifier = UInt32(fileStatus.st_gid)
         #if os(Linux)
-        modificationDate = Date(timeIntervalSince1970: Double(st.st_mtim.tv_sec) + Double(st.st_mtim.tv_nsec) / 1e9)
+        modificationDate = Date(timeIntervalSince1970: Double(fileStatus.st_mtim.tv_sec) + Double(fileStatus.st_mtim.tv_nsec) / 1e9)
         #else
-        modificationDate = Date(timeIntervalSince1970: Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1e9)
+        modificationDate = Date(timeIntervalSince1970: Double(fileStatus.st_mtimespec.tv_sec) + Double(fileStatus.st_mtimespec.tv_nsec) / 1e9)
         #endif
     }
 
@@ -313,31 +281,28 @@ public struct FileInfo {
         return s
     }
 
-    public var userName: String { FileInfo.userName(uid) }
-    public var groupName: String { FileInfo.groupName(gid) }
+    public var userName: String { FileInfo.userName(userIdentifier) }
+    public var groupName: String { FileInfo.groupName(groupIdentifier) }
 
-    public static func userName(_ uid: UInt32) -> String {
-        if let pw = getpwuid(uid_t(uid)), let n = pw.pointee.pw_name { return String(cString: n) }
-        return String(uid)
+    public static func userName(_ userIdentifier: UInt32) -> String {
+        if let passwordEntry = getpwuid(uid_t(userIdentifier)), let n = passwordEntry.pointee.pw_name { return String(cString: n) }
+        return String(userIdentifier)
     }
-    public static func groupName(_ gid: UInt32) -> String {
-        if let gr = getgrgid(gid_t(gid)), let n = gr.pointee.gr_name { return String(cString: n) }
-        return String(gid)
+    public static func groupName(_ groupIdentifier: UInt32) -> String {
+        if let groupEntry = getgrgid(gid_t(groupIdentifier)), let n = groupEntry.pointee.gr_name { return String(cString: n) }
+        return String(groupIdentifier)
     }
 }
 
-// MARK: - Formatting helpers
-
 public enum ShellFormat {
-    /// Human readable size like `ls -h`/`du -h` (1K = 1024).
     public static func humanSize(_ bytes: Int64) -> String {
         let units = ["", "K", "M", "G", "T", "P"]
         var value = Double(bytes)
-        var idx = 0
-        while value >= 1024 && idx < units.count - 1 { value /= 1024; idx += 1 }
-        if idx == 0 { return String(bytes) }
-        if value < 10 { return String(format: "%.1f%@", (value * 10).rounded(.up) / 10, units[idx]) }
-        return String(format: "%.0f%@", value.rounded(.up), units[idx])
+        var index = 0
+        while value >= 1024 && index < units.count - 1 { value /= 1024; index += 1 }
+        if index == 0 { return String(bytes) }
+        if value < 10 { return String(format: "%.1f%@", (value * 10).rounded(.up) / 10, units[index]) }
+        return String(format: "%.0f%@", value.rounded(.up), units[index])
     }
 
     public static func pad(_ s: String, _ width: Int, right: Bool = false) -> String {
@@ -347,46 +312,43 @@ public enum ShellFormat {
         return right ? padding + s : s + padding
     }
 
-    /// Lays out `items` in columns (like `ls`), column-major. `displayItems` may contain ANSI colours.
     public static func columns(_ items: [String], display: [String]? = nil, width: Int) -> String {
         guard !items.isEmpty else { return "" }
         let shown = display ?? items
         let widths = items.map { DisplayWidth.of($0) }
-        let maxW = widths.max() ?? 0
-        let colWidth = maxW + 2
-        let cols = max(1, min(items.count, (width + 2) / max(1, colWidth)))
-        // Try to pack tighter with per-column widths.
+        let maxWidth = widths.max() ?? 0
+        let colWidth = maxWidth + 2
+        let columnCount = max(1, min(items.count, (width + 2) / max(1, colWidth)))
         var best: (rows: Int, colWidths: [Int])? = nil
         var c = min(items.count, max(1, width / 3))
         while c >= 1 {
             let rows = (items.count + c - 1) / c
-            var cw: [Int] = []
-            for col in 0..<c {
+            var columnWidths: [Int] = []
+            for column in 0..<c {
                 var m = 0
-                for row in 0..<rows { let i = col * rows + row; if i < items.count { m = max(m, widths[i]) } }
-                cw.append(m)
+                for row in 0..<rows { let i = column * rows + row; if i < items.count { m = max(m, widths[i]) } }
+                columnWidths.append(m)
             }
-            let total = cw.reduce(0, +) + 2 * (c - 1)
-            if total <= width { best = (rows, cw); break }
+            let total = columnWidths.reduce(0, +) + 2 * (c - 1)
+            if total <= width { best = (rows, columnWidths); break }
             c -= 1
         }
-        let layout = best ?? ((items.count + cols - 1) / cols, Array(repeating: maxW, count: cols))
+        let layout = best ?? ((items.count + columnCount - 1) / columnCount, Array(repeating: maxWidth, count: columnCount))
         var out = ""
         for row in 0..<layout.rows {
             var line = ""
-            for col in 0..<layout.colWidths.count {
-                let i = col * layout.rows + row
+            for column in 0..<layout.colWidths.count {
+                let i = column * layout.rows + row
                 guard i < items.count else { continue }
-                let isLast = (col + 1) * layout.rows + row >= items.count
+                let isLast = (column + 1) * layout.rows + row >= items.count
                 line += shown[i]
-                if !isLast { line += String(repeating: " ", count: layout.colWidths[col] - widths[i] + 2) }
+                if !isLast { line += String(repeating: " ", count: layout.colWidths[column] - widths[i] + 2) }
             }
             out += line + "\n"
         }
         return out
     }
 
-    /// Interprets backslash escapes as `echo -e` / `printf` do. Returns (text, stop) where stop is true on `\c`.
     public static func unescape(_ s: String) -> (String, Bool) {
         var out = ""
         let chars = Array(s.unicodeScalars)
@@ -410,7 +372,7 @@ public enum ShellFormat {
             case "0", "1", "2", "3", "4", "5", "6", "7":
                 var v = 0; var digits = 0
                 var j = i - 1
-                if n == "0" { j = i } // \0NNN
+                if n == "0" { j = i }
                 while j < chars.count, digits < 3, let d = Int(String(chars[j])), d < 8 { v = v * 8 + d; j += 1; digits += 1 }
                 i = j
                 if let u = Unicode.Scalar(v) { out.unicodeScalars.append(u) }
@@ -431,8 +393,6 @@ public enum ShellFormat {
     }
 }
 
-// MARK: - ANSI
-
 public enum ANSI {
     public static let reset = "\u{1B}[0m"
     public static let bold = "\u{1B}[1m"
@@ -448,7 +408,6 @@ public enum ANSI {
     public static let boldCyan = "\u{1B}[1;36m"
     public static let clearScreen = "\u{1B}[H\u{1B}[2J\u{1B}[3J"
 
-    /// Removes CSI/OSC escape sequences.
     public static func strip(_ s: String) -> String {
         var out = ""
         var it = Array(s.unicodeScalars)
@@ -473,9 +432,6 @@ public enum ANSI {
     }
 }
 
-// MARK: - Display width
-
-/// Terminal column width of text (approximation of wcwidth()).
 public enum DisplayWidth {
     public static func of(scalar u: Unicode.Scalar) -> Int {
         let v = u.value
@@ -520,7 +476,6 @@ public enum DisplayWidth {
         return w
     }
 
-    /// Width of a string, ignoring ANSI escapes.
     public static func of(_ s: String) -> Int {
         let plain = s.contains("\u{1B}") ? ANSI.strip(s) : s
         return plain.reduce(0) { $0 + of($1) }

@@ -200,7 +200,7 @@ final class ShellInterpreterTests: ShellTestCase {
         let token = CancellationToken()
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { token.cancel() }
         let start = Date()
-        let status = shell.run("sleep 10; echo not reached", io: ShellIO(stdin: EmptyInputStream(), stdout: BufferOutputStream(), stderr: BufferOutputStream()), cancellation: token)
+        let status = shell.run("sleep 10; echo not reached", streams: StandardStreams(stdin: EmptyInputStream(), stdout: BufferOutputStream(), stderr: BufferOutputStream()), cancellation: token)
         XCTAssertLessThan(Date().timeIntervalSince(start), 2)
         XCTAssertEqual(status, 130)
     }
@@ -209,7 +209,7 @@ final class ShellInterpreterTests: ShellTestCase {
         let token = CancellationToken()
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.2) { token.cancel() }
         let out = BufferOutputStream()
-        let status = shell.run("yes", io: ShellIO(stdin: EmptyInputStream(), stdout: NullOutputStream(), stderr: out), cancellation: token)
+        let status = shell.run("yes", streams: StandardStreams(stdin: EmptyInputStream(), stdout: NullOutputStream(), stderr: out), cancellation: token)
         XCTAssertEqual(status, 130)
     }
 

@@ -1,9 +1,5 @@
 import Foundation
 
-// MARK: - Cancellation
-
-/// Cooperative cancellation flag shared by all commands of one top-level execution.
-/// Ctrl-C sets it; long-running commands poll `isCancelled` or use `sleep(_:)`.
 public final class CancellationToken {
     private let condition = NSCondition()
     private var cancelled = false
@@ -22,7 +18,6 @@ public final class CancellationToken {
         condition.unlock()
     }
 
-    /// Sleeps for `seconds` or until cancelled. Returns false if cancelled.
     @discardableResult
     public func sleep(_ seconds: Double) -> Bool {
         let deadline = Date(timeIntervalSinceNow: max(0, seconds))
@@ -34,13 +29,9 @@ public final class CancellationToken {
     }
 }
 
-// MARK: - Output streams
-
 public protocol ShellOutputStream: AnyObject {
     func write(_ bytes: [UInt8])
-    /// True once the consumer went away (e.g. the reading end of a pipe was closed).
     var isClosed: Bool { get }
-    /// True if this stream is connected to the terminal.
     var isTerminal: Bool { get }
     func flush()
 }
@@ -51,7 +42,6 @@ public extension ShellOutputStream {
     func flush() {}
 }
 
-/// Collects all output in memory (used for tests, command substitution, etc).
 public final class BufferOutputStream: ShellOutputStream {
     private let lock = NSLock()
     private var storage: [UInt8] = []
@@ -64,7 +54,6 @@ public final class BufferOutputStream: ShellOutputStream {
     public func clear() { lock.lock(); storage.removeAll(); lock.unlock() }
 }
 
-/// Discards everything.
 public final class NullOutputStream: ShellOutputStream {
     public init() {}
     public func write(_ bytes: [UInt8]) {}
@@ -72,7 +61,6 @@ public final class NullOutputStream: ShellOutputStream {
     public var isTerminal: Bool { false }
 }
 
-/// Forwards to a closure.
 public final class ClosureOutputStream: ShellOutputStream {
     private let sink: ([UInt8]) -> Void
     public let isTerminal: Bool
@@ -81,20 +69,18 @@ public final class ClosureOutputStream: ShellOutputStream {
     public var isClosed: Bool { false }
 }
 
-/// Buffered writer to a file.
 public final class FileOutputStream: ShellOutputStream {
     private let handle: FileHandle
     private var buffer: [UInt8] = []
     private let lock = NSLock()
     private var closed = false
 
-    /// Opens (creating if necessary) the file. Returns nil on failure.
     public init?(path: String, append: Bool) {
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        if fm.fileExists(atPath: path, isDirectory: &isDir) {
-            if isDir.boolValue { return nil }
-        } else if !fm.createFile(atPath: path, contents: nil) {
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {
+            if isDirectory.boolValue { return nil }
+        } else if !fileManager.createFile(atPath: path, contents: nil) {
             return nil
         }
         guard let h = FileHandle(forWritingAtPath: path) else { return nil }
@@ -123,19 +109,14 @@ public final class FileOutputStream: ShellOutputStream {
     deinit { close() }
 }
 
-// MARK: - Input streams
-
 public protocol ShellInputStream: AnyObject {
-    /// Blocks until data is available. Returns nil at end of input (or when cancelled).
     func read(maxLength: Int) -> [UInt8]?
     var isTerminal: Bool { get }
-    /// Signals that no more data will be read (pipe writers then see `isClosed`).
     func close()
 }
 
 public extension ShellInputStream {
     func close() {}
-    /// Reads until end of input.
     func readAll() -> [UInt8] {
         var out: [UInt8] = []
         while let chunk = read(maxLength: 65536) { out.append(contentsOf: chunk) }
@@ -168,8 +149,8 @@ public final class DataInputStream: ShellInputStream {
 public final class FileInputStream: ShellInputStream {
     private let handle: FileHandle
     public init?(path: String) {
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue,
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue,
               let h = FileHandle(forReadingAtPath: path) else { return nil }
         handle = h
     }
@@ -181,9 +162,6 @@ public final class FileInputStream: ShellInputStream {
     public func close() { handle.closeFile() }
 }
 
-// MARK: - Pipe
-
-/// In-memory bounded pipe connecting two concurrently running commands.
 public final class PipeChannel {
     private let condition = NSCondition()
     private var buffer: [UInt8] = []
@@ -254,9 +232,6 @@ public final class PipeChannel {
     }
 }
 
-// MARK: - Line reader
-
-/// Splits an input stream into lines (without the trailing newline).
 public final class LineReader {
     private let input: ShellInputStream
     private var pending: [UInt8] = []
@@ -264,12 +239,11 @@ public final class LineReader {
 
     public init(_ input: ShellInputStream) { self.input = input }
 
-    /// Returns the next line as raw bytes (without "\n"), or nil at end of input.
     public func nextLineBytes() -> [UInt8]? {
         while true {
-            if let idx = pending.firstIndex(of: 0x0A) {
-                let line = Array(pending[0..<idx])
-                pending.removeFirst(idx + 1)
+            if let index = pending.firstIndex(of: 0x0A) {
+                let line = Array(pending[0..<index])
+                pending.removeFirst(index + 1)
                 return line
             }
             if eof {
@@ -287,7 +261,6 @@ public final class LineReader {
         return String(decoding: bytes, as: UTF8.self)
     }
 
-    /// Reads all remaining lines.
     public func allLines() -> [String] {
         var lines: [String] = []
         while let l = nextLine() { lines.append(l) }

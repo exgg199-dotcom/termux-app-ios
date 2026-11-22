@@ -1,7 +1,6 @@
 import XCTest
 @testable import TermuxShell
 
-/// Collects backend output thread-safely and lets tests wait for text.
 final class OutputCollector {
     private let condition = NSCondition()
     private var data: [UInt8] = []
@@ -86,13 +85,13 @@ final class BuiltinShellBackendTests: XCTestCase {
         XCTAssertEqual(output.waitForExit(), 7)
     }
 
-    func testCtrlDOnEmptyLineExits() {
+    func testControlDOnEmptyLineExits() {
         startBackend()
         backend.write([0x04])
         XCTAssertEqual(output.waitForExit(), 0)
     }
 
-    func testCtrlCInterruptsRunningCommand() {
+    func testControlCInterruptsRunningCommand() {
         startBackend()
         type("sleep 30; echo done\r")
         Thread.sleep(forTimeInterval: 0.2)
@@ -107,7 +106,7 @@ final class BuiltinShellBackendTests: XCTestCase {
         XCTAssertFalse(afterInterrupt.contains("done"))
     }
 
-    func testCtrlCStopsYes() {
+    func testControlCStopsYes() {
         startBackend()
         type("yes\r")
         XCTAssertTrue(output.wait(for: "y\r\ny\r\n"))
@@ -124,7 +123,6 @@ final class BuiltinShellBackendTests: XCTestCase {
         Thread.sleep(forTimeInterval: 0.2)
         let offset = output.text.count
         type("typed line\r")
-        // Echo by the line discipline, then cat's output.
         XCTAssertTrue(output.wait(for: "typed line\r\ntyped line\r\n", after: offset), output.text)
         backend.write([0x04])
         XCTAssertTrue(output.wait(for: promptEnd, after: offset))

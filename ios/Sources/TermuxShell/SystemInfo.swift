@@ -7,10 +7,9 @@ import Darwin
 private func systemUname(_ u: inout utsname) -> Int32 { Darwin.uname(&u) }
 #endif
 
-/// Information about the host system used by `uname`, `whoami`, `hostname`, etc.
 public enum SystemInfo {
     public static var userName: String {
-        if let pw = getpwuid(getuid()), let n = pw.pointee.pw_name {
+        if let passwordEntry = getpwuid(getuid()), let n = passwordEntry.pointee.pw_name {
             let s = String(cString: n)
             if !s.isEmpty { return s }
         }
@@ -18,9 +17,9 @@ public enum SystemInfo {
     }
 
     public static var hostName: String {
-        var buf = [CChar](repeating: 0, count: 256)
-        if gethostname(&buf, buf.count) == 0 {
-            let s = String(cString: buf)
+        var buffer = [CChar](repeating: 0, count: 256)
+        if gethostname(&buffer, buffer.count) == 0 {
+            let s = String(cString: buffer)
             if !s.isEmpty { return s }
         }
         return "localhost"

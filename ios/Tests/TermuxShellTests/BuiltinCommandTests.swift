@@ -30,16 +30,16 @@ final class BuiltinCommandTests: ShellTestCase {
     func testLsColumnsAndColorsOnTerminal() {
         for n in ["one", "two", "three", "four"] { write(n, "") }
         try? FileManager.default.createDirectory(atPath: home + "/dir", withIntermediateDirectories: true)
-        let tty = BufferOutputStream(isTerminal: true)
+        let terminal = BufferOutputStream(isTerminal: true)
         shell.terminalColumns = 80
-        shell.run("ls", io: ShellIO(stdin: EmptyInputStream(), stdout: tty, stderr: tty))
-        let s = tty.string
+        shell.run("ls", streams: StandardStreams(stdin: EmptyInputStream(), stdout: terminal, stderr: terminal))
+        let s = terminal.string
         XCTAssertTrue(s.contains("\u{1B}[1;34mdir\u{1B}[0m"), s)
         XCTAssertEqual(s.split(separator: "\n").count, 1, "should fit in one row: \(s)")
-        tty.clear()
+        terminal.clear()
         shell.terminalColumns = 10
-        shell.run("ls", io: ShellIO(stdin: EmptyInputStream(), stdout: tty, stderr: tty))
-        XCTAssertGreaterThan(tty.string.split(separator: "\n").count, 1)
+        shell.run("ls", streams: StandardStreams(stdin: EmptyInputStream(), stdout: terminal, stderr: terminal))
+        XCTAssertGreaterThan(terminal.string.split(separator: "\n").count, 1)
     }
 
     func testCatAndNumbers() {
@@ -213,8 +213,8 @@ final class BuiltinCommandTests: ShellTestCase {
         struct Hello: ShellCommand {
             let name = "hello"
             let summary = "say hello"
-            func run(_ ctx: CommandContext) -> Int32 {
-                ctx.print("Hello, \(ctx.args.first ?? "world")!")
+            func run(_ context: CommandContext) -> Int32 {
+                context.print("Hello, \(context.arguments.first ?? "world")!")
                 return 0
             }
         }

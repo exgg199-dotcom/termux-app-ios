@@ -1,7 +1,6 @@
 import Foundation
 
-/// The standard streams of a command.
-public struct ShellIO {
+public struct StandardStreams {
     public var stdin: ShellInputStream
     public var stdout: ShellOutputStream
     public var stderr: ShellOutputStream
@@ -10,14 +9,12 @@ public struct ShellIO {
     }
 }
 
-/// Shell state and execution engine. Independent of any terminal, so it can be used and tested on its own.
 public final class ShellInterpreter {
     private let lock = NSRecursiveLock()
 
     public let homeDirectory: String
     public let registry: CommandRegistry
     public let history: ShellHistory
-    /// Name used in error messages.
     public var shellName = "sh"
 
     private var _environment: [String: String]
@@ -51,12 +48,10 @@ public final class ShellInterpreter {
         ]
         for (k, v) in environment { initialEnvironment[k] = v }
         _environment = initialEnvironment
-        let cwd = environment["PWD"].map { ShellPath.normalize($0) } ?? home
-        _currentDirectory = cwd
-        _environment["PWD"] = cwd
+        let workingDirectory = environment["PWD"].map { ShellPath.normalize($0) } ?? home
+        _currentDirectory = workingDirectory
+        _environment["PWD"] = workingDirectory
     }
-
-    // MARK: State accessors
 
     private func locked<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
 
@@ -82,13 +77,11 @@ public final class ShellInterpreter {
     public var lastStatus: Int32 { get { locked { _lastStatus } } set { locked { _lastStatus = newValue } } }
     public var positionalParameters: [String] { get { locked { _positional } } set { locked { _positional = newValue } } }
 
-    /// Set by `exit`. Execution stops once set.
     public var exitRequested: Int32? { get { locked { _exitRequested } } set { locked { _exitRequested = newValue } } }
 
     public var terminalColumns: Int { get { locked { _columns } } set { locked { _columns = max(1, newValue) } } }
     public var terminalRows: Int { get { locked { _rows } } set { locked { _rows = max(1, newValue) } } }
 
-    /// Creates a child shell (for subshells, command substitution and scripts) sharing commands and history.
     public func subshell() -> ShellInterpreter {
         let child = ShellInterpreter(homeDirectory: homeDirectory, environment: environment, registry: registry, history: history)
         lock.lock()
@@ -103,76 +96,71 @@ public final class ShellInterpreter {
         return child
     }
 
-    // MARK: Running
-
     public func parse(_ source: String) throws -> CommandList {
         try ShellParser.parse(source, aliases: aliases)
     }
 
-    /// Parses and runs `source`. Syntax errors are printed to stderr (status 2).
     @discardableResult
-    public func run(_ source: String, io: ShellIO, cancellation: CancellationToken = CancellationToken()) -> Int32 {
+    public func run(_ source: String, streams: StandardStreams, cancellation: CancellationToken = CancellationToken()) -> Int32 {
         do {
             let list = try parse(source)
-            return execute(list, io: io, cancellation: cancellation)
+            return execute(list, streams: streams, cancellation: cancellation)
         } catch let e as ShellSyntaxError {
-            io.stderr.writeLine("\(shellName): \(e.description)")
+            streams.stderr.writeLine("\(shellName): \(e.description)")
             lastStatus = 2
             return 2
         } catch {
-            io.stderr.writeLine("\(shellName): \(error)")
+            streams.stderr.writeLine("\(shellName): \(error)")
             lastStatus = 2
             return 2
         }
     }
 
-    /// Convenience for tests: runs `source` and returns (status, stdout, stderr).
     public func runCapturing(_ source: String, stdin: String = "") -> (status: Int32, stdout: String, stderr: String) {
-        let out = BufferOutputStream(), err = BufferOutputStream()
-        let status = run(source, io: ShellIO(stdin: DataInputStream(stdin), stdout: out, stderr: err))
-        return (status, out.string, err.string)
+        let output = BufferOutputStream(), errors = BufferOutputStream()
+        let status = run(source, streams: StandardStreams(stdin: DataInputStream(stdin), stdout: output, stderr: errors))
+        return (status, output.string, errors.string)
     }
 
-    /// Executes a file in the current shell (`source`).
-    public func source(file path: String, arguments: [String], io: ShellIO, cancellation: CancellationToken) -> Int32 {
+    public func source(file path: String, arguments: [String], streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
         guard let data = FileManager.default.contents(atPath: path) else {
-            io.stderr.writeLine("\(shellName): \(path): No such file or directory")
+            streams.stderr.writeLine("\(shellName): \(path): No such file or directory")
             return 1
         }
         let text = String(decoding: data, as: UTF8.self)
         let saved = positionalParameters
         if !arguments.isEmpty { positionalParameters = arguments }
         defer { if !arguments.isEmpty { positionalParameters = saved } }
-        return run(text, io: io, cancellation: cancellation)
+        return run(text, streams: streams, cancellation: cancellation)
     }
 
-    public func execute(_ list: CommandList, io: ShellIO, cancellation: CancellationToken) -> Int32 {
+    public func execute(_ list: CommandList, streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
         var status = lastStatus
         for item in list.items {
             if exitRequested != nil || cancellation.isCancelled { break }
-            status = execute(item, io: io, cancellation: cancellation)
+            status = execute(item, streams: streams, cancellation: cancellation)
         }
         if cancellation.isCancelled { status = 130; lastStatus = 130 }
         return status
     }
 
-    private func execute(_ andOr: AndOrList, io: ShellIO, cancellation: CancellationToken) -> Int32 {
-        var status = execute(andOr.first, io: io, cancellation: cancellation)
-        for (op, pipeline) in andOr.rest {
+    private func execute(_ andOr: AndOrList, streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
+        var status = execute(andOr.first, streams: streams, cancellation: cancellation)
+        for (operation, pipeline) in andOr.rest {
             if exitRequested != nil || cancellation.isCancelled { break }
-            switch op {
+            switch operation {
             case .and: if status != 0 { continue }
             case .or: if status == 0 { continue }
             }
-            status = execute(pipeline, io: io, cancellation: cancellation)
+            status = execute(pipeline, streams: streams, cancellation: cancellation)
         }
         return status
     }
 
-    private func execute(_ pipeline: Pipeline, io: ShellIO, cancellation: CancellationToken) -> Int32 {
+    private func execute(_ pipeline: Pipeline, streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
         var status: Int32
         if pipeline.commands.count == 1 {
-            status = execute(pipeline.commands[0], io: io, cancellation: cancellation)
+            status = execute(pipeline.commands[0], streams: streams, cancellation: cancellation)
         } else {
             let n = pipeline.commands.count
             let pipes = (0..<(n - 1)).map { _ in PipeChannel(cancellation: cancellation) }
@@ -180,23 +168,23 @@ public final class ShellInterpreter {
             let writers = pipes.map { $0.writer }
             let statuses = LockedBox([Int32](repeating: 0, count: n))
             let group = DispatchGroup()
-            for (idx, cmd) in pipeline.commands.enumerated() {
-                let stageIO = ShellIO(stdin: idx == 0 ? io.stdin : readers[idx - 1],
-                                      stdout: idx == n - 1 ? io.stdout : writers[idx],
-                                      stderr: io.stderr)
+            for (index, command) in pipeline.commands.enumerated() {
+                let stageStreams = StandardStreams(stdin: index == 0 ? streams.stdin : readers[index - 1],
+                                      stdout: index == n - 1 ? streams.stdout : writers[index],
+                                      stderr: streams.stderr)
                 group.enter()
                 let thread = Thread { [self] in
-                    let s = self.execute(cmd, io: stageIO, cancellation: cancellation)
-                    if idx < n - 1 { writers[idx].close() }
-                    if idx > 0 { readers[idx - 1].close() }
-                    statuses.mutate { $0[idx] = s }
+                    let s = self.execute(command, streams: stageStreams, cancellation: cancellation)
+                    if index < n - 1 { writers[index].close() }
+                    if index > 0 { readers[index - 1].close() }
+                    statuses.mutate { $0[index] = s }
                     group.leave()
                 }
                 thread.stackSize = 4 << 20
                 thread.start()
             }
             group.wait()
-            _ = pipes // keep pipes alive until all stages are done
+            _ = pipes
             status = statuses.value[n - 1]
         }
         if pipeline.negated { status = status == 0 ? 1 : 0 }
@@ -204,184 +192,177 @@ public final class ShellInterpreter {
         return status
     }
 
-    private func execute(_ node: CommandNode, io: ShellIO, cancellation: CancellationToken) -> Int32 {
+    private func execute(_ node: CommandNode, streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
         switch node {
-        case .simple(let cmd):
-            return executeSimple(cmd, io: io, cancellation: cancellation)
+        case .simple(let command):
+            return executeSimple(command, streams: streams, cancellation: cancellation)
         case .subshell(let list, let redirs):
             var opened: [FileOutputStream] = []
             defer { opened.forEach { $0.close() } }
-            guard let rio = applyRedirections(redirs, io: io, cancellation: cancellation, opened: &opened) else { return 1 }
+            guard let redirectedStreams = applyRedirections(redirs, streams: streams, cancellation: cancellation, opened: &opened) else { return 1 }
             let child = subshell()
-            let s = child.execute(list, io: rio, cancellation: cancellation)
+            let s = child.execute(list, streams: redirectedStreams, cancellation: cancellation)
             return child.exitRequested ?? s
         }
     }
 
-    private func executeSimple(_ cmd: SimpleCommand, io: ShellIO, cancellation: CancellationToken) -> Int32 {
+    private func executeSimple(_ command: SimpleCommand, streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
         var assignments: [(String, String)] = []
-        for a in cmd.assignments {
-            assignments.append((a.name, expandNoSplit(a.value, io: io, cancellation: cancellation)))
+        for a in command.assignments {
+            assignments.append((a.name, expandNoSplit(a.value, streams: streams, cancellation: cancellation)))
         }
-        let argv = expand(cmd.words, io: io, cancellation: cancellation)
+        let argumentVector = expand(command.words, streams: streams, cancellation: cancellation)
         if cancellation.isCancelled { return 130 }
 
         var opened: [FileOutputStream] = []
         defer { opened.forEach { $0.close() } }
-        guard let rio = applyRedirections(cmd.redirections, io: io, cancellation: cancellation, opened: &opened) else {
+        guard let redirectedStreams = applyRedirections(command.redirections, streams: streams, cancellation: cancellation, opened: &opened) else {
             lastStatus = 1
             return 1
         }
 
-        if argv.isEmpty {
+        if argumentVector.isEmpty {
             for (k, v) in assignments { setVariable(k, v) }
             return lastStatus
         }
         var commandEnvironment = environment
         for (k, v) in assignments { commandEnvironment[k] = v }
-        let status = runCommand(argv, io: rio, cancellation: cancellation, environment: commandEnvironment)
-        rio.stdout.flush()
+        let status = runCommand(argumentVector, streams: redirectedStreams, cancellation: cancellation, environment: commandEnvironment)
+        redirectedStreams.stdout.flush()
         lastStatus = status
         return status
     }
 
-    /// Runs a command by argument vector (used by `env`, `xargs`-like commands and the interpreter itself).
-    public func runCommand(_ argv: [String], io: ShellIO, cancellation: CancellationToken, environment overrides: [String: String]? = nil) -> Int32 {
-        guard let name = argv.first else { return 0 }
+    public func runCommand(_ argumentVector: [String], streams: StandardStreams, cancellation: CancellationToken, environment overrides: [String: String]? = nil) -> Int32 {
+        guard let name = argumentVector.first else { return 0 }
         let commandEnvironment = overrides ?? environment
         if let command = registry.command(named: name) {
-            let ctx = CommandContext(argumentVector: argv, stdin: io.stdin, stdout: io.stdout, stderr: io.stderr, shell: self,
+            let context = CommandContext(argumentVector: argumentVector, stdin: streams.stdin, stdout: streams.stdout, stderr: streams.stderr, shell: self,
                                      cancellation: cancellation, environment: commandEnvironment, currentDirectory: currentDirectory)
-            return command.run(ctx)
+            return command.run(context)
         }
         if let script = findScript(name, environment: commandEnvironment) {
-            return runScript(script, argv: argv, io: io, cancellation: cancellation)
+            return runScript(script, argumentVector: argumentVector, streams: streams, cancellation: cancellation)
         }
         if name.contains("/") {
             let full = ShellPath.resolve(name, relativeTo: currentDirectory)
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: full, isDirectory: &isDir) {
-                io.stderr.writeLine("\(shellName): \(name): \(isDir.boolValue ? "Is a directory" : "Permission denied")")
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: full, isDirectory: &isDirectory) {
+                streams.stderr.writeLine("\(shellName): \(name): \(isDirectory.boolValue ? "Is a directory" : "Permission denied")")
                 return 126
             }
-            io.stderr.writeLine("\(shellName): \(name): No such file or directory")
+            streams.stderr.writeLine("\(shellName): \(name): No such file or directory")
             return 127
         }
-        io.stderr.writeLine("\(shellName): \(name): command not found")
+        streams.stderr.writeLine("\(shellName): \(name): command not found")
         return 127
     }
 
-    /// Finds a shell script: a path containing "/" or a file in $PATH.
     public func findScript(_ name: String, environment overrides: [String: String]? = nil) -> String? {
-        let fm = FileManager.default
-        func ok(_ p: String) -> Bool {
-            var isDir: ObjCBool = false
-            return fm.fileExists(atPath: p, isDirectory: &isDir) && !isDir.boolValue
+        let fileManager = FileManager.default
+        func isUsable(_ p: String) -> Bool {
+            var isDirectory: ObjCBool = false
+            return fileManager.fileExists(atPath: p, isDirectory: &isDirectory) && !isDirectory.boolValue
         }
         if name.contains("/") {
             let full = ShellPath.resolve(name, relativeTo: currentDirectory)
-            guard ok(full), let info = FileInfo(path: full, follow: true), info.isExecutable || name.hasSuffix(".sh") else { return nil }
+            guard isUsable(full), let info = FileInfo(path: full, follow: true), info.isExecutable || name.hasSuffix(".sh") else { return nil }
             return full
         }
         let path = (overrides ?? environment)["PATH"] ?? ""
-        for dir in path.split(separator: ":") {
-            let full = ShellPath.resolve(name, relativeTo: ShellPath.resolve(String(dir), relativeTo: currentDirectory))
-            if ok(full) { return full }
+        for directory in path.split(separator: ":") {
+            let full = ShellPath.resolve(name, relativeTo: ShellPath.resolve(String(directory), relativeTo: currentDirectory))
+            if isUsable(full) { return full }
         }
         return nil
     }
 
-    private func runScript(_ path: String, argv: [String], io: ShellIO, cancellation: CancellationToken) -> Int32 {
+    private func runScript(_ path: String, argumentVector: [String], streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
         guard let data = FileManager.default.contents(atPath: path) else {
-            io.stderr.writeLine("\(shellName): \(argv[0]): Permission denied"); return 126
+            streams.stderr.writeLine("\(shellName): \(argumentVector[0]): Permission denied"); return 126
         }
         let bytes = [UInt8](data.prefix(4096))
         let isText = !bytes.contains(0) && String(validatingUTF8: bytes.map { CChar(bitPattern: $0) } + [0]) != nil
         if bytes.starts(with: [0x7F, 0x45, 0x4C, 0x46]) || bytes.starts(with: [0xCF, 0xFA, 0xED, 0xFE]) || !isText {
-            io.stderr.writeLine("\(shellName): \(argv[0]): cannot execute binary file (iOS does not allow running native executables)")
+            streams.stderr.writeLine("\(shellName): \(argumentVector[0]): cannot execute binary file (iOS does not allow running native executables)")
             return 126
         }
         let text = String(decoding: data, as: UTF8.self)
         if text.hasPrefix("#!") {
             let first = text.prefix { $0 != "\n" }
-            let interp = first.dropFirst(2).trimmingCharacters(in: .whitespaces)
+            let interpreterLine = first.dropFirst(2).trimmingCharacters(in: .whitespaces)
             let known = ["sh", "bash", "ash", "dash", "zsh"]
-            let parts = interp.split(separator: " ").map(String.init)
-            let prog = parts.first.map { ShellPath.basename($0) } ?? ""
-            let target = prog == "env" ? (parts.dropFirst().first ?? "") : prog
+            let parts = interpreterLine.split(separator: " ").map(String.init)
+            let programName = parts.first.map { ShellPath.basename($0) } ?? ""
+            let target = programName == "env" ? (parts.dropFirst().first ?? "") : programName
             if !known.contains(target) {
-                io.stderr.writeLine("\(shellName): \(argv[0]): interpreter '\(target)' is not available on iOS")
+                streams.stderr.writeLine("\(shellName): \(argumentVector[0]): interpreter '\(target)' is not available on iOS")
                 return 126
             }
         }
         let child = subshell()
-        child.positionalParameters = argv
-        let s = child.run(text, io: io, cancellation: cancellation)
+        child.positionalParameters = argumentVector
+        let s = child.run(text, streams: streams, cancellation: cancellation)
         return child.exitRequested ?? s
     }
 
-    // MARK: Redirections
-
-    private func applyRedirections(_ redirs: [Redirection], io: ShellIO, cancellation: CancellationToken,
-                                   opened: inout [FileOutputStream]) -> ShellIO? {
-        guard !redirs.isEmpty else { return io }
-        var stdin = io.stdin
-        var outs: [Int: ShellOutputStream] = [1: io.stdout, 2: io.stderr]
+    private func applyRedirections(_ redirs: [Redirection], streams: StandardStreams, cancellation: CancellationToken,
+                                   opened: inout [FileOutputStream]) -> StandardStreams? {
+        guard !redirs.isEmpty else { return streams }
+        var stdin = streams.stdin
+        var outs: [Int: ShellOutputStream] = [1: streams.stdout, 2: streams.stderr]
         for r in redirs {
-            let target = expandNoSplit(r.target, io: io, cancellation: cancellation)
+            let target = expandNoSplit(r.target, streams: streams, cancellation: cancellation)
             let path = ShellPath.resolve(target, relativeTo: currentDirectory)
-            switch r.op {
+            switch r.operation {
             case .output, .append, .outputBoth, .appendBoth:
                 if target == "/dev/null" {
-                    outs[r.fd] = NullOutputStream()
-                    if r.op == .outputBoth || r.op == .appendBoth { outs[1] = NullOutputStream(); outs[2] = outs[1] }
+                    outs[r.fileDescriptor] = NullOutputStream()
+                    if r.operation == .outputBoth || r.operation == .appendBoth { outs[1] = NullOutputStream(); outs[2] = outs[1] }
                     continue
                 }
-                guard let f = FileOutputStream(path: path, append: r.op == .append || r.op == .appendBoth) else {
-                    io.stderr.writeLine("\(shellName): \(target): \(redirectionError(path))")
+                guard let f = FileOutputStream(path: path, append: r.operation == .append || r.operation == .appendBoth) else {
+                    streams.stderr.writeLine("\(shellName): \(target): \(redirectionError(path))")
                     return nil
                 }
                 opened.append(f)
-                if r.op == .outputBoth || r.op == .appendBoth { outs[1] = f; outs[2] = f } else { outs[r.fd] = f }
+                if r.operation == .outputBoth || r.operation == .appendBoth { outs[1] = f; outs[2] = f } else { outs[r.fileDescriptor] = f }
             case .input:
                 if target == "/dev/null" { stdin = EmptyInputStream(); continue }
                 guard let f = FileInputStream(path: path) else {
-                    io.stderr.writeLine("\(shellName): \(target): \(redirectionError(path))")
+                    streams.stderr.writeLine("\(shellName): \(target): \(redirectionError(path))")
                     return nil
                 }
                 stdin = f
             case .hereString:
                 stdin = DataInputStream(target + "\n")
             case .duplicateOutput:
-                if target == "-" { outs[r.fd] = NullOutputStream(); continue }
-                guard let src = Int(target), let s = outs[src] else {
-                    if r.fd == 1, !target.isEmpty, Int(target) == nil {
-                        // `>&file` is the same as `&>file`
+                if target == "-" { outs[r.fileDescriptor] = NullOutputStream(); continue }
+                guard let source = Int(target), let s = outs[source] else {
+                    if r.fileDescriptor == 1, !target.isEmpty, Int(target) == nil {
                         guard let f = FileOutputStream(path: path, append: false) else {
-                            io.stderr.writeLine("\(shellName): \(target): \(redirectionError(path))"); return nil
+                            streams.stderr.writeLine("\(shellName): \(target): \(redirectionError(path))"); return nil
                         }
                         opened.append(f); outs[1] = f; outs[2] = f; continue
                     }
-                    io.stderr.writeLine("\(shellName): \(target): bad file descriptor"); return nil
+                    streams.stderr.writeLine("\(shellName): \(target): bad file descriptor"); return nil
                 }
-                outs[r.fd] = s
+                outs[r.fileDescriptor] = s
             case .duplicateInput:
                 if target == "0" { continue }
                 if target == "-" { stdin = EmptyInputStream(); continue }
-                io.stderr.writeLine("\(shellName): \(target): bad file descriptor"); return nil
+                streams.stderr.writeLine("\(shellName): \(target): bad file descriptor"); return nil
             }
         }
-        return ShellIO(stdin: stdin, stdout: outs[1] ?? io.stdout, stderr: outs[2] ?? io.stderr)
+        return StandardStreams(stdin: stdin, stdout: outs[1] ?? streams.stdout, stderr: outs[2] ?? streams.stderr)
     }
 
     private func redirectionError(_ path: String) -> String {
-        var isDir: ObjCBool = false
-        if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { return "Is a directory" }
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue { return "Is a directory" }
         if !FileManager.default.fileExists(atPath: ShellPath.dirname(path)) { return "No such file or directory" }
         return "Permission denied"
     }
-
-    // MARK: Expansion
 
     private struct Field {
         var text = ""
@@ -398,13 +379,12 @@ public final class ShellInterpreter {
         return out
     }
 
-    /// Expands words into fields: parameters, command substitution, arithmetic, tilde, field splitting and globbing.
-    public func expand(_ words: [ShellWord], io: ShellIO, cancellation: CancellationToken) -> [String] {
+    public func expand(_ words: [ShellWord], streams: StandardStreams, cancellation: CancellationToken) -> [String] {
         var result: [String] = []
         for w in words {
-            for f in expandFields(w, io: io, cancellation: cancellation) {
+            for f in expandFields(w, streams: streams, cancellation: cancellation) {
                 if f.hasGlob {
-                    let matches = Glob.expand(f.pattern, cwd: currentDirectory)
+                    let matches = Glob.expand(f.pattern, workingDirectory: currentDirectory)
                     if !matches.isEmpty { result.append(contentsOf: matches); continue }
                 }
                 result.append(f.text)
@@ -413,16 +393,15 @@ public final class ShellInterpreter {
         return result
     }
 
-    /// Expands a word to a single string (no field splitting or globbing).
-    public func expandNoSplit(_ word: ShellWord, io: ShellIO, cancellation: CancellationToken) -> String {
+    public func expandNoSplit(_ word: ShellWord, streams: StandardStreams, cancellation: CancellationToken) -> String {
         var out = ""
-        for (idx, part) in word.parts.enumerated() {
+        for (index, part) in word.parts.enumerated() {
             switch part {
-            case .literal(let s): out += idx == 0 ? expandTilde(s) : s
+            case .literal(let s): out += index == 0 ? expandTilde(s) : s
             case .quoted(let s): out += s
-            case .parameter(let p, _): out += expandParameter(p, io: io, cancellation: cancellation).joined(separator: " ")
-            case .command(let src, _): out += commandSubstitution(src, io: io, cancellation: cancellation)
-            case .arithmetic(let expr, _): out += arithmetic(expr, io: io, cancellation: cancellation)
+            case .parameter(let p, _): out += expandParameter(p, streams: streams, cancellation: cancellation).joined(separator: " ")
+            case .command(let source, _): out += commandSubstitution(source, streams: streams, cancellation: cancellation)
+            case .arithmetic(let expression, _): out += arithmetic(expression, streams: streams, cancellation: cancellation)
             }
         }
         return out
@@ -437,7 +416,7 @@ public final class ShellInterpreter {
         return s
     }
 
-    private func expandFields(_ word: ShellWord, io: ShellIO, cancellation: CancellationToken) -> [Field] {
+    private func expandFields(_ word: ShellWord, streams: StandardStreams, cancellation: CancellationToken) -> [Field] {
         var fields: [Field] = []
         var current: Field? = nil
 
@@ -459,10 +438,10 @@ public final class ShellInterpreter {
             }
         }
 
-        for (idx, part) in word.parts.enumerated() {
+        for (index, part) in word.parts.enumerated() {
             switch part {
             case .literal(let s):
-                if idx == 0 && s.hasPrefix("~") {
+                if index == 0 && s.hasPrefix("~") {
                     let expanded = expandTilde(s)
                     if expanded != s {
                         let slash = s.firstIndex(of: "/") ?? s.endIndex
@@ -477,9 +456,9 @@ public final class ShellInterpreter {
             case .quoted(let s):
                 appendQuoted(s)
             case .parameter(let p, let quoted):
-                let values = expandParameter(p, io: io, cancellation: cancellation)
+                let values = expandParameter(p, streams: streams, cancellation: cancellation)
                 if quoted {
-                    if p.name == "@" && p.op == nil && !p.length {
+                    if p.name == "@" && p.operation == nil && !p.length {
                         for (k, v) in values.enumerated() {
                             if k > 0 { if let f = current { fields.append(f) }; current = nil }
                             appendQuoted(v)
@@ -490,11 +469,11 @@ public final class ShellInterpreter {
                 } else {
                     appendUnquoted(values.joined(separator: " "), split: true)
                 }
-            case .command(let src, let quoted):
-                let v = commandSubstitution(src, io: io, cancellation: cancellation)
+            case .command(let source, let quoted):
+                let v = commandSubstitution(source, streams: streams, cancellation: cancellation)
                 if quoted { appendQuoted(v) } else { appendUnquoted(v, split: true) }
-            case .arithmetic(let expr, let quoted):
-                let v = arithmetic(expr, io: io, cancellation: cancellation)
+            case .arithmetic(let expression, let quoted):
+                let v = arithmetic(expression, streams: streams, cancellation: cancellation)
                 if quoted { appendQuoted(v) } else { appendUnquoted(v, split: true) }
             }
         }
@@ -524,100 +503,96 @@ public final class ShellInterpreter {
         }
     }
 
-    private func expandParameter(_ p: ParameterExpansion, io: ShellIO, cancellation: CancellationToken) -> [String] {
+    private func expandParameter(_ p: ParameterExpansion, streams: StandardStreams, cancellation: CancellationToken) -> [String] {
         let raw = parameterValue(p.name)
         if p.length { return [String((raw ?? []).joined(separator: " ").count)] }
         let value = raw?.joined(separator: " ")
-        guard let op = p.op else { return raw ?? [] }
-        func arg() -> String {
+        guard let operation = p.operation else { return raw ?? [] }
+        func argumentText() -> String {
             guard let a = p.argument, !a.isEmpty else { return "" }
             if let tokens = try? ShellLexer.tokenize("\"" + a.replacingOccurrences(of: "\"", with: "\\\"") + "\""),
                case .word(let w)? = tokens.first {
-                return expandNoSplit(w, io: io, cancellation: cancellation)
+                return expandNoSplit(w, streams: streams, cancellation: cancellation)
             }
             return a
         }
         let isSet = value != nil
         let isNonEmpty = !(value ?? "").isEmpty
-        switch op {
-        case ":-": return [isNonEmpty ? value! : arg()]
-        case "-": return [isSet ? value! : arg()]
+        switch operation {
+        case ":-": return [isNonEmpty ? value! : argumentText()]
+        case "-": return [isSet ? value! : argumentText()]
         case ":=", "=":
-            if op == ":=" ? isNonEmpty : isSet { return [value!] }
-            let v = arg(); setVariable(p.name, v); return [v]
-        case ":+": return [isNonEmpty ? arg() : ""]
-        case "+": return [isSet ? arg() : ""]
+            if operation == ":=" ? isNonEmpty : isSet { return [value!] }
+            let v = argumentText(); setVariable(p.name, v); return [v]
+        case ":+": return [isNonEmpty ? argumentText() : ""]
+        case "+": return [isSet ? argumentText() : ""]
         case ":?", "?":
-            if op == ":?" ? isNonEmpty : isSet { return [value!] }
-            let msg = arg()
-            io.stderr.writeLine("\(shellName): \(p.name): \(msg.isEmpty ? "parameter null or not set" : msg)")
+            if operation == ":?" ? isNonEmpty : isSet { return [value!] }
+            let message = argumentText()
+            streams.stderr.writeLine("\(shellName): \(p.name): \(message.isEmpty ? "parameter null or not set" : message)")
             return [""]
         case "#", "##", "%", "%%":
             let v = value ?? ""
-            let pattern = arg()
-            return [ShellInterpreter.removePattern(v, pattern: pattern, op: op)]
+            let pattern = argumentText()
+            return [ShellInterpreter.removePattern(v, pattern: pattern, operation: operation)]
         default:
             return raw ?? []
         }
     }
 
-    static func removePattern(_ value: String, pattern: String, op: String) -> String {
+    static func removePattern(_ value: String, pattern: String, operation: String) -> String {
         let chars = Array(value)
         let n = chars.count
-        switch op {
+        switch operation {
         case "#", "##":
-            let range: [Int] = op == "#" ? Array(0...n) : Array((0...n).reversed())
+            let range: [Int] = operation == "#" ? Array(0...n) : Array((0...n).reversed())
             for k in range where Glob.match(pattern, String(chars[0..<k])) { return String(chars[k...]) }
         default:
-            let range: [Int] = op == "%" ? Array((0...n).reversed()) : Array(0...n)
+            let range: [Int] = operation == "%" ? Array((0...n).reversed()) : Array(0...n)
             for k in range where Glob.match(pattern, String(chars[k...])) { return String(chars[0..<k]) }
         }
         return value
     }
 
-    private func commandSubstitution(_ source: String, io: ShellIO, cancellation: CancellationToken) -> String {
+    private func commandSubstitution(_ source: String, streams: StandardStreams, cancellation: CancellationToken) -> String {
         let child = subshell()
         let out = BufferOutputStream()
-        let s = child.run(source, io: ShellIO(stdin: io.stdin, stdout: out, stderr: io.stderr), cancellation: cancellation)
+        let s = child.run(source, streams: StandardStreams(stdin: streams.stdin, stdout: out, stderr: streams.stderr), cancellation: cancellation)
         lastStatus = child.exitRequested ?? s
         var text = out.string
         while text.hasSuffix("\n") { text.removeLast() }
         return text
     }
 
-    private func arithmetic(_ expr: String, io: ShellIO, cancellation: CancellationToken) -> String {
-        // Expand $vars inside the expression first.
-        var expanded = expr
-        if expr.contains("$") || expr.contains("`"),
-           let tokens = try? ShellLexer.tokenize("\"" + expr.replacingOccurrences(of: "\"", with: "\\\"") + "\""),
+    private func arithmetic(_ expression: String, streams: StandardStreams, cancellation: CancellationToken) -> String {
+        var expanded = expression
+        if expression.contains("$") || expression.contains("`"),
+           let tokens = try? ShellLexer.tokenize("\"" + expression.replacingOccurrences(of: "\"", with: "\\\"") + "\""),
            case .word(let w)? = tokens.first {
-            expanded = expandNoSplit(w, io: io, cancellation: cancellation)
+            expanded = expandNoSplit(w, streams: streams, cancellation: cancellation)
         }
         do {
-            var ev = ArithmeticEvaluator(expanded) { [self] name in self.variable(name) }
-            let v = try ev.evaluate { [self] name, value in self.setVariable(name, String(value)) }
+            var evaluator = ArithmeticEvaluator(expanded) { [self] name in self.variable(name) }
+            let v = try evaluator.evaluate { [self] name, value in self.setVariable(name, String(value)) }
             return String(v)
         } catch {
-            io.stderr.writeLine("\(shellName): \(expr): arithmetic syntax error")
+            streams.stderr.writeLine("\(shellName): \(expression): arithmetic syntax error")
             return "0"
         }
     }
 
-    // MARK: Prompt
-
-    /// Expands PS1 (supports \w \W \u \h \H \$ \n \e \[ \] \\ \t \d) or the Termux default prompt.
     public func prompt() -> String {
-        let cwd = ShellPath.abbreviate(currentDirectory, home: homeDirectory)
-        guard let ps1 = variable("PS1"), !ps1.isEmpty else {
-            return "\u{1B}[0;32m\(cwd)\u{1B}[0m \u{1B}[0;97m$\u{1B}[0m "
+        let workingDirectory = ShellPath.abbreviate(currentDirectory, home: homeDirectory)
+        guard let promptTemplate = variable("PS1"), !promptTemplate.isEmpty else {
+            return "\u{1B}[0;32m\(workingDirectory)\u{1B}[0m \u{1B}[0;97m$\u{1B}[0m "
         }
         var out = ""
-        var it = ps1.makeIterator()
+        var it = promptTemplate.makeIterator()
         while let c = it.next() {
             guard c == "\\", let n = it.next() else { out.append(c); continue }
             switch n {
-            case "w": out += cwd
-            case "W": out += cwd == "~" ? "~" : ShellPath.basename(currentDirectory)
+            case "w": out += workingDirectory
+            case "W": out += workingDirectory == "~" ? "~" : ShellPath.basename(currentDirectory)
             case "u": out += variable("USER") ?? SystemInfo.userName
             case "h": out += SystemInfo.hostName.split(separator: ".").first.map(String.init) ?? ""
             case "H": out += SystemInfo.hostName
@@ -636,14 +611,9 @@ public final class ShellInterpreter {
         return out
     }
 
-    // MARK: Completion
-
     public struct Completion: Equatable {
-        /// Character offset in the line where the replaced word starts.
         public var wordStart: Int
-        /// Full replacement words (escaped).
         public var candidates: [String]
-        /// What to display when listing (e.g. just the file name).
         public var displays: [String]
         public init(wordStart: Int, candidates: [String], displays: [String]) {
             self.wordStart = wordStart; self.candidates = candidates; self.displays = displays
@@ -652,7 +622,6 @@ public final class ShellInterpreter {
 
     private static let wordBreakers: Set<Character> = [" ", "\t", ";", "|", "&", "<", ">", "(", ")"]
 
-    /// Completes the word ending at the end of `lineBeforeCursor`.
     public func complete(_ lineBeforeCursor: String) -> Completion {
         let chars = Array(lineBeforeCursor)
         var start = chars.count
@@ -663,10 +632,10 @@ public final class ShellInterpreter {
         }
         let rawWord = String(chars[start...])
         var word = ""
-        var esc = false
+        var escaped = false
         for c in rawWord {
-            if esc { word.append(c); esc = false; continue }
-            if c == "\\" { esc = true; continue }
+            if escaped { word.append(c); escaped = false; continue }
+            if c == "\\" { escaped = true; continue }
             if c == "'" || c == "\"" { continue }
             word.append(c)
         }
@@ -686,8 +655,8 @@ public final class ShellInterpreter {
         if commandPosition && !word.contains("/") {
             var names = Set(registry.names)
             names.formUnion(aliases.keys)
-            for dir in (variable("PATH") ?? "").split(separator: ":") {
-                let d = ShellPath.resolve(String(dir), relativeTo: currentDirectory)
+            for directory in (variable("PATH") ?? "").split(separator: ":") {
+                let d = ShellPath.resolve(String(directory), relativeTo: currentDirectory)
                 for f in (try? FileManager.default.contentsOfDirectory(atPath: d)) ?? [] { names.insert(f) }
             }
             for n in names.sorted() where n.hasPrefix(word) {
@@ -695,25 +664,24 @@ public final class ShellInterpreter {
             }
             return Completion(wordStart: start, candidates: candidates, displays: displays)
         }
-        // Path completion.
-        let dirPart: String
+        let directoryPart: String
         let filePrefix: String
         if let slash = word.lastIndex(of: "/") {
-            dirPart = String(word[...slash])
+            directoryPart = String(word[...slash])
             filePrefix = String(word[word.index(after: slash)...])
         } else {
-            dirPart = ""
+            directoryPart = ""
             filePrefix = word
         }
-        let listDir = dirPart.isEmpty ? currentDirectory : ShellPath.resolve(expandTilde(dirPart), relativeTo: currentDirectory)
-        let fm = FileManager.default
-        let entries = ((try? fm.contentsOfDirectory(atPath: listDir)) ?? []).sorted()
+        let listedDirectory = directoryPart.isEmpty ? currentDirectory : ShellPath.resolve(expandTilde(directoryPart), relativeTo: currentDirectory)
+        let fileManager = FileManager.default
+        let entries = ((try? fileManager.contentsOfDirectory(atPath: listedDirectory)) ?? []).sorted()
         for e in entries where e.hasPrefix(filePrefix) {
             if e.hasPrefix(".") && !filePrefix.hasPrefix(".") { continue }
-            var isDir: ObjCBool = false
-            _ = fm.fileExists(atPath: listDir + "/" + e, isDirectory: &isDir)
-            let suffix = isDir.boolValue ? "/" : ""
-            candidates.append(ShellInterpreter.escapeForCompletion(dirPart + e) + suffix)
+            var isDirectory: ObjCBool = false
+            _ = fileManager.fileExists(atPath: listedDirectory + "/" + e, isDirectory: &isDirectory)
+            let suffix = isDirectory.boolValue ? "/" : ""
+            candidates.append(ShellInterpreter.escapeForCompletion(directoryPart + e) + suffix)
             displays.append(e + suffix)
         }
         if word == "~" { return Completion(wordStart: start, candidates: ["~/"], displays: ["~/"]) }
@@ -730,9 +698,6 @@ public final class ShellInterpreter {
     }
 }
 
-// MARK: - History
-
-/// Command history, optionally persisted to a file (one entry per line).
 public final class ShellHistory {
     private let lock = NSLock()
     private var entries: [String] = []
@@ -772,10 +737,7 @@ public final class ShellHistory {
     }
 }
 
-// MARK: - Globbing
-
 public enum Glob {
-    /// fnmatch-style matching with `*`, `?`, `[...]`, `[!...]` and backslash escapes.
     public static func match(_ pattern: String, _ string: String, ignoreCase: Bool = false) -> Bool {
         let p = Array(ignoreCase ? pattern.lowercased() : pattern)
         let s = Array(ignoreCase ? string.lowercased() : string)
@@ -805,8 +767,7 @@ public enum Glob {
         return pi == p.count
     }
 
-    /// Returns (matched, indexAfterClass) or nil if the bracket is not a valid class.
-    private static func matchClass(_ p: [Character], _ start: Int, _ ch: Character) -> (Bool, Int)? {
+    private static func matchClass(_ p: [Character], _ start: Int, _ character: Character) -> (Bool, Int)? {
         var i = start + 1
         var negate = false
         if i < p.count && (p[i] == "!" || p[i] == "^") { negate = true; i += 1 }
@@ -818,18 +779,18 @@ public enum Glob {
             if p[i] == "[" && i + 1 < p.count && p[i + 1] == ":" {
                 if let end = (i + 2..<p.count).first(where: { p[$0] == ":" && $0 + 1 < p.count && p[$0 + 1] == "]" }) {
                     let name = String(p[(i + 2)..<end])
-                    if charClass(name, ch) { matched = true }
+                    if charClass(name, character) { matched = true }
                     i = end + 2; continue
                 }
             }
-            var lo = p[i]
-            if lo == "\\" && i + 1 < p.count { i += 1; lo = p[i] }
+            var lower = p[i]
+            if lower == "\\" && i + 1 < p.count { i += 1; lower = p[i] }
             if i + 2 < p.count && p[i + 1] == "-" && p[i + 2] != "]" {
-                let hi = p[i + 2]
-                if lo <= ch && ch <= hi { matched = true }
+                let upper = p[i + 2]
+                if lower <= character && character <= upper { matched = true }
                 i += 3
             } else {
-                if lo == ch { matched = true }
+                if lower == character { matched = true }
                 i += 1
             }
         }
@@ -851,35 +812,33 @@ public enum Glob {
     }
 
     public static func hasMeta(_ s: String) -> Bool {
-        var esc = false
+        var escaped = false
         for c in s {
-            if esc { esc = false; continue }
-            if c == "\\" { esc = true; continue }
+            if escaped { escaped = false; continue }
+            if c == "\\" { escaped = true; continue }
             if c == "*" || c == "?" || c == "[" { return true }
         }
         return false
     }
 
     static func unescape(_ s: String) -> String {
-        var out = ""; var esc = false
+        var out = ""; var escaped = false
         for c in s {
-            if esc { out.append(c); esc = false; continue }
-            if c == "\\" { esc = true; continue }
+            if escaped { out.append(c); escaped = false; continue }
+            if c == "\\" { escaped = true; continue }
             out.append(c)
         }
         return out
     }
 
-    /// Expands a pattern against the file system. Relative patterns are resolved against `cwd`
-    /// and returned relative. Returns [] if nothing matches.
-    public static func expand(_ pattern: String, cwd: String) -> [String] {
+    public static func expand(_ pattern: String, workingDirectory: String) -> [String] {
         let absolute = pattern.hasPrefix("/")
         let components = pattern.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
         let trailingSlash = pattern.hasSuffix("/")
-        var results: [(display: String, full: String)] = [(absolute ? "/" : "", absolute ? "/" : cwd)]
-        let fm = FileManager.default
-        for (idx, comp) in components.enumerated() {
-            let isLast = idx == components.count - 1
+        var results: [(display: String, full: String)] = [(absolute ? "/" : "", absolute ? "/" : workingDirectory)]
+        let fileManager = FileManager.default
+        for (index, comp) in components.enumerated() {
+            let isLast = index == components.count - 1
             var next: [(String, String)] = []
             for (display, full) in results {
                 let joinDisplay: (String) -> String = { name in
@@ -892,21 +851,21 @@ public enum Glob {
                     if isLast && !trailingSlash {
                         if FileInfo(path: f) != nil { next.append((joinDisplay(name), f)) }
                     } else {
-                        var isDir: ObjCBool = false
-                        if fm.fileExists(atPath: f, isDirectory: &isDir), isDir.boolValue || name == ".." || name == "." {
+                        var isDirectory: ObjCBool = false
+                        if fileManager.fileExists(atPath: f, isDirectory: &isDirectory), isDirectory.boolValue || name == ".." || name == "." {
                             next.append((joinDisplay(name), f))
                         }
                     }
                     continue
                 }
-                guard let entries = try? fm.contentsOfDirectory(atPath: full) else { continue }
+                guard let entries = try? fileManager.contentsOfDirectory(atPath: full) else { continue }
                 for e in entries.sorted() {
                     if e.hasPrefix(".") && !comp.hasPrefix(".") && !comp.hasPrefix("\\.") { continue }
                     guard match(comp, e) else { continue }
                     let f = joinFull(e)
                     if !isLast || trailingSlash {
-                        var isDir: ObjCBool = false
-                        guard fm.fileExists(atPath: f, isDirectory: &isDir), isDir.boolValue else { continue }
+                        var isDirectory: ObjCBool = false
+                        guard fileManager.fileExists(atPath: f, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
                     }
                     next.append((joinDisplay(e), f))
                 }

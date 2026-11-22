@@ -1,11 +1,6 @@
 import Foundation
+import TermuxTerminal
 
-/// In-process interactive shell used on iOS, where fork/exec is not allowed.
-///
-/// Input bytes from the terminal go through a readline-like `LineEditor` while the shell
-/// waits for a command, and through a simple canonical-mode line discipline
-/// (`TerminalInputStream`) while a command runs and reads stdin. Commands run on a
-/// background serial queue; Ctrl-C cancels the running command cooperatively.
 public final class BuiltinShellBackend: TerminalBackend {
     public var onOutput: (([UInt8]) -> Void)? {
         get { callbackLock.lock(); defer { callbackLock.unlock() }; return _onOutput }
@@ -19,13 +14,10 @@ public final class BuiltinShellBackend: TerminalBackend {
 
     public let homeDirectory: URL
     public let interpreter: ShellInterpreter
-    /// Print the welcome message on start (suppressed by `~/.hushlogin`).
     public var showsWelcome = true
-    /// Continuation prompt for incomplete input.
     public var continuationPrompt = "> "
 
     private let lock = NSRecursiveLock()
-    /// Separate lock for the callbacks so output can be emitted from any thread without `lock`.
     private let callbackLock = NSLock()
     private var _onOutput: (([UInt8]) -> Void)?
     private var _onExit: ((Int32) -> Void)?
@@ -33,7 +25,7 @@ public final class BuiltinShellBackend: TerminalBackend {
     private let execQueue = DispatchQueue(label: "com.termux.shell.exec", qos: .userInitiated)
     private var writer: TerminalWriter!
     private var terminalInput: TerminalInputStream!
-    private var io: ShellIO!
+    private var streams: StandardStreams!
     private var started = false
     private var exited = false
     private var running = false
@@ -49,17 +41,14 @@ public final class BuiltinShellBackend: TerminalBackend {
         writer = TerminalWriter { [weak self] bytes in self?.onOutput?(bytes) }
         terminalInput = TerminalInputStream(echo: { [weak self] bytes in self?.writer.write(bytes, immediate: true) })
         let out = TerminalOutputStream(writer: writer)
-        io = ShellIO(stdin: terminalInput, stdout: out, stderr: out)
+        streams = StandardStreams(stdin: terminalInput, stdout: out, stderr: out)
         editor.enablesBracketedPaste = true
         editor.completer = { [weak self] line in
             self?.interpreter.complete(line) ?? ShellInterpreter.Completion(wordStart: 0, candidates: [], displays: [])
         }
     }
 
-    /// True while a command is executing.
     public var isRunningCommand: Bool { lock.lock(); defer { lock.unlock() }; return running }
-
-    // MARK: TerminalBackend
 
     public func start(columns: Int, rows: Int, cellWidthPixels: Int, cellHeightPixels: Int) {
         lock.lock()
@@ -72,15 +61,15 @@ public final class BuiltinShellBackend: TerminalBackend {
         currentToken = token
         terminalInput.reset(token)
         execQueue.async { [self] in
-            let fm = FileManager.default
+            let fileManager = FileManager.default
             let home = interpreter.homeDirectory
-            if showsWelcome && !fm.fileExists(atPath: home + "/.hushlogin") {
-                io.stdout.write(BuiltinShellBackend.welcome)
+            if showsWelcome && !fileManager.fileExists(atPath: home + "/.hushlogin") {
+                streams.stdout.write(BuiltinShellBackend.welcome)
             }
             for startupFile in [".profile", ".shrc"] {
                 let path = home + "/" + startupFile
-                if fm.fileExists(atPath: path) && interpreter.exitRequested == nil {
-                    _ = interpreter.source(file: path, arguments: [], io: io, cancellation: token)
+                if fileManager.fileExists(atPath: path) && interpreter.exitRequested == nil {
+                    _ = interpreter.source(file: path, arguments: [], streams: streams, cancellation: token)
                 }
             }
             commandFinished()
@@ -94,7 +83,7 @@ public final class BuiltinShellBackend: TerminalBackend {
         if running {
             var chunk: [UInt8] = []
             for b in data {
-                if b == 0x03 || b == 0x1C { // Ctrl-C / Ctrl-\ interrupt the running command
+                if b == 0x03 || b == 0x1C {
                     if !chunk.isEmpty { terminalInput.receive(chunk); chunk = [] }
                     interruptRunningCommand()
                 } else {
@@ -121,8 +110,6 @@ public final class BuiltinShellBackend: TerminalBackend {
         if !wasExited { finish(-9) }
     }
 
-    // MARK: Internals
-
     static let welcome = """
     Welcome to Termux for iOS!
 
@@ -131,7 +118,6 @@ public final class BuiltinShellBackend: TerminalBackend {
 
     Working with files:  ls, cd, cat, cp, mv, rm, mkdir, find, grep
     Run 'help' to list all commands.
-
 
     """
 
@@ -149,7 +135,6 @@ public final class BuiltinShellBackend: TerminalBackend {
         writer.write(Array("^C\r\n".utf8), immediate: true)
     }
 
-    /// Feeds bytes to the line editor while no command is running. Must hold `lock`.
     private func processEditorInput(_ bytes: ArraySlice<UInt8>) {
         var rest = bytes
         while !rest.isEmpty && !running && !exited {
@@ -195,7 +180,6 @@ public final class BuiltinShellBackend: TerminalBackend {
             showPrompt()
             return
         } catch {
-            // Fall through: run() reports the syntax error.
         }
         continuation = ""
         interpreter.history.add(source)
@@ -208,14 +192,13 @@ public final class BuiltinShellBackend: TerminalBackend {
         currentToken = token
         terminalInput.reset(token)
         execQueue.async { [self] in
-            _ = interpreter.run(source, io: io, cancellation: token)
+            _ = interpreter.run(source, streams: streams, cancellation: token)
             commandFinished()
         }
     }
 
-    /// Called on the exec queue after a command (or the startup files) completed.
     private func commandFinished() {
-        io.stdout.flush()
+        streams.stdout.flush()
         lock.lock()
         defer { lock.unlock() }
         guard !exited else { return }
@@ -240,9 +223,6 @@ public final class BuiltinShellBackend: TerminalBackend {
     }
 }
 
-// MARK: - Terminal output
-
-/// Buffers output to the terminal and flushes it shortly after (or immediately on request).
 final class TerminalWriter {
     private let lock = NSLock()
     private let emitLock = NSRecursiveLock()
@@ -279,7 +259,6 @@ final class TerminalWriter {
     }
 }
 
-/// Command output stream connected to the terminal; translates "\n" to "\r\n" like a tty with ONLCR.
 final class TerminalOutputStream: ShellOutputStream {
     private let writer: TerminalWriter
     init(writer: TerminalWriter) { self.writer = writer }
@@ -297,11 +276,6 @@ final class TerminalOutputStream: ShellOutputStream {
     func flush() { writer.flush() }
 }
 
-// MARK: - Terminal input (canonical mode)
-
-/// stdin of commands run from the interactive shell: a minimal canonical-mode line discipline
-/// (echo, backspace, Ctrl-U, Enter, Ctrl-D as EOF). Input typed while no command reads stays
-/// unprocessed and is handed back to the line editor afterwards (type-ahead).
 final class TerminalInputStream: ShellInputStream {
     private let condition = NSCondition()
     private var raw: [UInt8] = []
@@ -309,8 +283,8 @@ final class TerminalInputStream: ShellInputStream {
     private var ready: [UInt8] = []
     private var eofPending = false
     private var readerWaiting = false
-    private var lastWasCR = false
-    private var escState = 0 // 0 none, 1 after ESC, 2 in CSI
+    private var lastWasCarriageReturn = false
+    private var escapeState = 0
     private var token = CancellationToken()
     private let echo: ([UInt8]) -> Void
 
@@ -321,7 +295,7 @@ final class TerminalInputStream: ShellInputStream {
     func reset(_ token: CancellationToken) {
         condition.lock()
         self.token = token
-        ready = []; lineBuffer = []; eofPending = false; escState = 0
+        ready = []; lineBuffer = []; eofPending = false; escapeState = 0
         condition.unlock()
     }
 
@@ -333,7 +307,6 @@ final class TerminalInputStream: ShellInputStream {
         condition.unlock()
     }
 
-    /// Drops all pending input (on Ctrl-C).
     func discardInput() {
         condition.lock()
         raw = []; lineBuffer = []; ready = []; eofPending = false
@@ -341,7 +314,6 @@ final class TerminalInputStream: ShellInputStream {
         condition.unlock()
     }
 
-    /// Returns input not consumed by the command, for the line editor.
     func takeLeftover() -> [UInt8] {
         condition.lock()
         defer { condition.unlock() }
@@ -368,22 +340,21 @@ final class TerminalInputStream: ShellInputStream {
         }
     }
 
-    /// Canonical processing of raw bytes. Must hold `condition`.
     private func processRaw() {
         var echoOut: [UInt8] = []
         var i = 0
         while i < raw.count {
             let b = raw[i]
             i += 1
-            let wasCR = lastWasCR
-            lastWasCR = false
-            if escState == 1 { escState = b == UInt8(ascii: "[") || b == UInt8(ascii: "O") ? 2 : 0; continue }
-            if escState == 2 { if (0x40...0x7E).contains(b) { escState = 0 }; continue }
+            let wasCarriageReturn = lastWasCarriageReturn
+            lastWasCarriageReturn = false
+            if escapeState == 1 { escapeState = b == UInt8(ascii: "[") || b == UInt8(ascii: "O") ? 2 : 0; continue }
+            if escapeState == 2 { if (0x40...0x7E).contains(b) { escapeState = 0 }; continue }
             switch b {
-            case 0x1B: escState = 1
+            case 0x1B: escapeState = 1
             case 0x0D, 0x0A:
-                if b == 0x0A && wasCR { continue }
-                lastWasCR = b == 0x0D
+                if b == 0x0A && wasCarriageReturn { continue }
+                lastWasCarriageReturn = b == 0x0D
                 echoOut += [0x0D, 0x0A]
                 ready += lineBuffer + [0x0A]
                 lineBuffer = []
@@ -394,7 +365,6 @@ final class TerminalInputStream: ShellInputStream {
                 return
             case 0x7F, 0x08:
                 guard !lineBuffer.isEmpty else { continue }
-                // Remove one UTF-8 encoded scalar.
                 var removed: [UInt8] = []
                 while let last = lineBuffer.popLast() {
                     removed.insert(last, at: 0)

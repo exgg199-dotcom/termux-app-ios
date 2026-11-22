@@ -1,152 +1,151 @@
 import Foundation
 
-/// Commands that operate on shell state or are otherwise shell-level (cd, export, echo, test, ...).
 enum ShellBuiltins {
     static func registerShellCommands(_ r: CommandRegistry) {
-        r.register("cd", "change the working directory") { ctx in
+        r.register("cd", "change the working directory") { context in
             var target: String
-            let args = ctx.args.filter { $0 != "-P" && $0 != "-L" }
+            let arguments = context.arguments.filter { $0 != "-P" && $0 != "-L" }
             var printDir = false
-            if let a = args.first {
+            if let a = arguments.first {
                 if a == "-" {
-                    guard let old = ctx.shell.variable("OLDPWD") else { ctx.error("OLDPWD not set"); return 1 }
+                    guard let old = context.shell.variable("OLDPWD") else { context.error("OLDPWD not set"); return 1 }
                     target = old; printDir = true
                 } else {
                     target = a
                 }
             } else {
-                target = ctx.shell.variable("HOME") ?? ctx.homeDirectory
+                target = context.shell.variable("HOME") ?? context.homeDirectory
             }
-            let full = ctx.resolve(target)
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: full, isDirectory: &isDir) else {
-                ctx.error("\(target): No such file or directory"); return 1
+            let full = context.resolve(target)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: full, isDirectory: &isDirectory) else {
+                context.error("\(target): No such file or directory"); return 1
             }
-            guard isDir.boolValue else { ctx.error("\(target): Not a directory"); return 1 }
-            guard FileManager.default.isExecutableFile(atPath: full) else { ctx.error("\(target): Permission denied"); return 1 }
-            ctx.shell.currentDirectory = full
-            if printDir { ctx.print(full) }
+            guard isDirectory.boolValue else { context.error("\(target): Not a directory"); return 1 }
+            guard FileManager.default.isExecutableFile(atPath: full) else { context.error("\(target): Permission denied"); return 1 }
+            context.shell.currentDirectory = full
+            if printDir { context.print(full) }
             return 0
         }
 
-        r.register("pwd", "print the working directory") { ctx in
-            if ctx.has("-P") {
-                ctx.print(URL(fileURLWithPath: ctx.currentDirectory).resolvingSymlinksInPath().path)
+        r.register("pwd", "print the working directory") { context in
+            if context.has("-P") {
+                context.print(URL(fileURLWithPath: context.currentDirectory).resolvingSymlinksInPath().path)
             } else {
-                ctx.print(ctx.currentDirectory)
+                context.print(context.currentDirectory)
             }
             return 0
         }
 
-        r.register("echo", "print arguments (-n no newline, -e interpret escapes)") { ctx in
-            var args = ctx.args
+        r.register("echo", "print arguments (-n no newline, -e interpret escapes)") { context in
+            var arguments = context.arguments
             var newline = true, escapes = false
-            while let f = args.first, f.hasPrefix("-"), f.count > 1, f.dropFirst().allSatisfy({ "neE".contains($0) }) {
+            while let f = arguments.first, f.hasPrefix("-"), f.count > 1, f.dropFirst().allSatisfy({ "neE".contains($0) }) {
                 if f.contains("n") { newline = false }
                 if f.contains("e") { escapes = true }
                 if f.contains("E") { escapes = false }
-                args.removeFirst()
+                arguments.removeFirst()
             }
-            var text = args.joined(separator: " ")
+            var text = arguments.joined(separator: " ")
             if escapes {
                 let (t, stop) = ShellFormat.unescape(text)
                 text = t
                 if stop { newline = false }
             }
-            ctx.stdout.write(text + (newline ? "\n" : ""))
+            context.stdout.write(text + (newline ? "\n" : ""))
             return 0
         }
 
-        r.register("printf", "formatted output") { ctx in
-            guard let format = ctx.args.first else { ctx.error("usage: printf format [arguments]"); return 2 }
-            ctx.stdout.write(Printf.format(format, Array(ctx.args.dropFirst())))
+        r.register("printf", "formatted output") { context in
+            guard let format = context.arguments.first else { context.error("usage: printf format [arguments]"); return 2 }
+            context.stdout.write(Printf.format(format, Array(context.arguments.dropFirst())))
             return 0
         }
 
-        r.register("export", "set environment variables") { ctx in
-            if ctx.args.isEmpty || ctx.args == ["-p"] {
-                for (k, v) in ctx.shell.environment.sorted(by: { $0.key < $1.key }) {
-                    ctx.print("export \(k)=\(quote(v))")
+        r.register("export", "set environment variables") { context in
+            if context.arguments.isEmpty || context.arguments == ["-p"] {
+                for (k, v) in context.shell.environment.sorted(by: { $0.key < $1.key }) {
+                    context.print("export \(k)=\(quote(v))")
                 }
                 return 0
             }
-            for a in ctx.args where a != "-n" {
+            for a in context.arguments where a != "-n" {
                 if let eq = a.firstIndex(of: "=") {
-                    ctx.shell.setVariable(String(a[..<eq]), String(a[a.index(after: eq)...]))
-                } else if ctx.shell.variable(a) == nil {
-                    ctx.shell.setVariable(a, "")
+                    context.shell.setVariable(String(a[..<eq]), String(a[a.index(after: eq)...]))
+                } else if context.shell.variable(a) == nil {
+                    context.shell.setVariable(a, "")
                 }
             }
             return 0
         }
 
-        r.register("unset", "remove variables") { ctx in
-            for a in ctx.args where !a.hasPrefix("-") { ctx.shell.setVariable(a, nil) }
+        r.register("unset", "remove variables") { context in
+            for a in context.arguments where !a.hasPrefix("-") { context.shell.setVariable(a, nil) }
             return 0
         }
 
-        r.register("set", "show shell variables or set positional parameters") { ctx in
-            if ctx.args.isEmpty {
-                for (k, v) in ctx.shell.environment.sorted(by: { $0.key < $1.key }) { ctx.print("\(k)=\(quote(v))") }
+        r.register("set", "show shell variables or set positional parameters") { context in
+            if context.arguments.isEmpty {
+                for (k, v) in context.shell.environment.sorted(by: { $0.key < $1.key }) { context.print("\(k)=\(quote(v))") }
                 return 0
             }
-            var args = ctx.args
-            if args.first == "--" { args.removeFirst(); ctx.shell.positionalParameters = [ctx.shell.positionalParameters.first ?? "sh"] + args }
+            var arguments = context.arguments
+            if arguments.first == "--" { arguments.removeFirst(); context.shell.positionalParameters = [context.shell.positionalParameters.first ?? "sh"] + arguments }
             return 0
         }
 
-        r.register("shift", "shift positional parameters") { ctx in
-            let n = Int(ctx.args.first ?? "1") ?? 1
-            var p = ctx.shell.positionalParameters
+        r.register("shift", "shift positional parameters") { context in
+            let n = Int(context.arguments.first ?? "1") ?? 1
+            var p = context.shell.positionalParameters
             guard p.count - 1 >= n else { return 1 }
             p.removeSubrange(1..<(1 + n))
-            ctx.shell.positionalParameters = p
+            context.shell.positionalParameters = p
             return 0
         }
 
-        r.register("alias", "define or list aliases") { ctx in
-            if ctx.args.isEmpty {
-                for (k, v) in ctx.shell.aliases.sorted(by: { $0.key < $1.key }) { ctx.print("alias \(k)=\(quote(v))") }
+        r.register("alias", "define or list aliases") { context in
+            if context.arguments.isEmpty {
+                for (k, v) in context.shell.aliases.sorted(by: { $0.key < $1.key }) { context.print("alias \(k)=\(quote(v))") }
                 return 0
             }
             var status: Int32 = 0
-            for a in ctx.args {
+            for a in context.arguments {
                 if let eq = a.firstIndex(of: "=") {
-                    ctx.shell.setAlias(String(a[..<eq]), String(a[a.index(after: eq)...]))
-                } else if let v = ctx.shell.aliases[a] {
-                    ctx.print("alias \(a)=\(quote(v))")
+                    context.shell.setAlias(String(a[..<eq]), String(a[a.index(after: eq)...]))
+                } else if let v = context.shell.aliases[a] {
+                    context.print("alias \(a)=\(quote(v))")
                 } else {
-                    ctx.error("\(a): not found"); status = 1
+                    context.error("\(a): not found"); status = 1
                 }
             }
             return status
         }
 
-        r.register("unalias", "remove aliases") { ctx in
-            if ctx.args.contains("-a") { for k in ctx.shell.aliases.keys { ctx.shell.setAlias(k, nil) }; return 0 }
+        r.register("unalias", "remove aliases") { context in
+            if context.arguments.contains("-a") { for k in context.shell.aliases.keys { context.shell.setAlias(k, nil) }; return 0 }
             var status: Int32 = 0
-            for a in ctx.args {
-                if ctx.shell.aliases[a] == nil { ctx.error("\(a): not found"); status = 1 } else { ctx.shell.setAlias(a, nil) }
+            for a in context.arguments {
+                if context.shell.aliases[a] == nil { context.error("\(a): not found"); status = 1 } else { context.shell.setAlias(a, nil) }
             }
             return status
         }
 
-        r.register("history", "show command history (-c clears)") { ctx in
-            if ctx.has("-c") { ctx.shell.history.clear(); return 0 }
-            let all = ctx.shell.history.all
+        r.register("history", "show command history (-c clears)") { context in
+            if context.has("-c") { context.shell.history.clear(); return 0 }
+            let all = context.shell.history.all
             var entries = Array(all.enumerated())
-            if let n = ctx.args.first.flatMap({ Int($0) }) { entries = Array(entries.suffix(n)) }
-            for (i, e) in entries { ctx.print(ShellFormat.pad(String(i + 1), 5, right: true) + "  " + e) }
+            if let n = context.arguments.first.flatMap({ Int($0) }) { entries = Array(entries.suffix(n)) }
+            for (i, e) in entries { context.print(ShellFormat.pad(String(i + 1), 5, right: true) + "  " + e) }
             return 0
         }
 
-        r.register("clear", "clear the terminal screen") { ctx in
-            ctx.stdout.write(ANSI.clearScreen)
+        r.register("clear", "clear the terminal screen") { context in
+            context.stdout.write(ANSI.clearScreen)
             return 0
         }
 
-        r.register("reset", "reset the terminal") { ctx in
-            ctx.stdout.write("\u{1B}c")
+        r.register("reset", "reset the terminal") { context in
+            context.stdout.write("\u{1B}c")
             return 0
         }
 
@@ -154,189 +153,189 @@ enum ShellBuiltins {
         r.register(":", "do nothing, successfully") { _ in 0 }
         r.register("false", "do nothing, unsuccessfully") { _ in 1 }
 
-        r.register("exit", "exit the shell") { ctx in
-            let code = ctx.args.first.flatMap { Int32($0) } ?? ctx.shell.lastStatus
-            ctx.shell.exitRequested = code
+        r.register("exit", "exit the shell") { context in
+            let code = context.arguments.first.flatMap { Int32($0) } ?? context.shell.lastStatus
+            context.shell.exitRequested = code
             return code
         }
 
-        r.register("source", "run commands from a file in the current shell") { ctx in
-            guard let file = ctx.args.first else { ctx.error("filename argument required"); return 2 }
-            var path = ctx.resolve(file)
-            if !file.contains("/"), !FileManager.default.fileExists(atPath: path), let s = ctx.shell.findScript(file) { path = s }
-            let io = ShellIO(stdin: ctx.stdin, stdout: ctx.stdout, stderr: ctx.stderr)
-            return ctx.shell.source(file: path, arguments: ctx.args.count > 1 ? ctx.args : [], io: io, cancellation: ctx.cancellation)
+        r.register("source", "run commands from a file in the current shell") { context in
+            guard let file = context.arguments.first else { context.error("filename argument required"); return 2 }
+            var path = context.resolve(file)
+            if !file.contains("/"), !FileManager.default.fileExists(atPath: path), let s = context.shell.findScript(file) { path = s }
+            let streams = StandardStreams(stdin: context.stdin, stdout: context.stdout, stderr: context.stderr)
+            return context.shell.source(file: path, arguments: context.arguments.count > 1 ? context.arguments : [], streams: streams, cancellation: context.cancellation)
         }
         r.alias(".", to: "source")
 
-        r.register("eval", "evaluate arguments as a command") { ctx in
-            let io = ShellIO(stdin: ctx.stdin, stdout: ctx.stdout, stderr: ctx.stderr)
-            return ctx.shell.run(ctx.args.joined(separator: " "), io: io, cancellation: ctx.cancellation)
+        r.register("eval", "evaluate arguments as a command") { context in
+            let streams = StandardStreams(stdin: context.stdin, stdout: context.stdout, stderr: context.stderr)
+            return context.shell.run(context.arguments.joined(separator: " "), streams: streams, cancellation: context.cancellation)
         }
 
-        r.register("command", "run a command bypassing aliases") { ctx in
-            var args = ctx.args
-            if args.first == "-v" {
-                args.removeFirst()
-                guard let n = args.first else { return 1 }
-                if ctx.shell.registry.command(named: n) != nil { ctx.print(n); return 0 }
-                if let s = ctx.shell.findScript(n) { ctx.print(s); return 0 }
+        r.register("command", "run a command bypassing aliases") { context in
+            var arguments = context.arguments
+            if arguments.first == "-v" {
+                arguments.removeFirst()
+                guard let n = arguments.first else { return 1 }
+                if context.shell.registry.command(named: n) != nil { context.print(n); return 0 }
+                if let s = context.shell.findScript(n) { context.print(s); return 0 }
                 return 1
             }
-            let io = ShellIO(stdin: ctx.stdin, stdout: ctx.stdout, stderr: ctx.stderr)
-            return ctx.shell.runCommand(args, io: io, cancellation: ctx.cancellation, environment: ctx.environment)
+            let streams = StandardStreams(stdin: context.stdin, stdout: context.stdout, stderr: context.stderr)
+            return context.shell.runCommand(arguments, streams: streams, cancellation: context.cancellation, environment: context.environment)
         }
 
-        r.register("read", "read a line from stdin into variables") { ctx in
-            let opts = ParsedOptions(ctx.args, flags: "rs", withValues: "p")
-            if let p = opts.value("p") { ctx.stderr.write(p); ctx.stderr.flush() }
-            guard let line = LineReader(ctx.stdin).nextLine() else { return 1 }
-            var names = opts.operands
+        r.register("read", "read a line from stdin into variables") { context in
+            let options = ParsedOptions(context.arguments, flags: "rs", withValues: "p")
+            if let p = options.value("p") { context.stderr.write(p); context.stderr.flush() }
+            guard let line = LineReader(context.stdin).nextLine() else { return 1 }
+            var names = options.operands
             if names.isEmpty { names = ["REPLY"] }
             var fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
             for (i, n) in names.enumerated() {
                 if i == names.count - 1 {
-                    ctx.shell.setVariable(n, fields.joined(separator: " "))
+                    context.shell.setVariable(n, fields.joined(separator: " "))
                 } else {
-                    ctx.shell.setVariable(n, fields.isEmpty ? "" : fields.removeFirst())
+                    context.shell.setVariable(n, fields.isEmpty ? "" : fields.removeFirst())
                 }
             }
             return 0
         }
 
-        r.register("type", "describe how a name would be interpreted") { ctx in
+        r.register("type", "describe how a name would be interpreted") { context in
             var status: Int32 = 0
-            for n in ctx.args {
-                if let a = ctx.shell.aliases[n] { ctx.print("\(n) is aliased to `\(a)'") }
-                else if ctx.shell.registry.command(named: n) != nil { ctx.print("\(n) is a shell builtin") }
-                else if let s = ctx.shell.findScript(n) { ctx.print("\(n) is \(s)") }
-                else { ctx.error("\(n): not found"); status = 1 }
+            for n in context.arguments {
+                if let a = context.shell.aliases[n] { context.print("\(n) is aliased to `\(a)'") }
+                else if context.shell.registry.command(named: n) != nil { context.print("\(n) is a shell builtin") }
+                else if let s = context.shell.findScript(n) { context.print("\(n) is \(s)") }
+                else { context.error("\(n): not found"); status = 1 }
             }
             return status
         }
 
-        r.register("which", "locate a command") { ctx in
+        r.register("which", "locate a command") { context in
             var status: Int32 = 0
-            for n in ctx.args where !n.hasPrefix("-") {
-                if ctx.shell.registry.command(named: n) != nil { ctx.print("\(n): shell built-in command") }
-                else if let s = ctx.shell.findScript(n) { ctx.print(s) }
+            for n in context.arguments where !n.hasPrefix("-") {
+                if context.shell.registry.command(named: n) != nil { context.print("\(n): shell built-in command") }
+                else if let s = context.shell.findScript(n) { context.print(s) }
                 else { status = 1 }
             }
             return status
         }
 
-        r.register("env", "print environment or run a command with a modified environment") { ctx in
-            var env = ctx.environment
-            var args = ctx.args
-            if args.first == "-i" { env = [:]; args.removeFirst() }
-            while let a = args.first, let eq = a.firstIndex(of: "="), a.first != "=" {
-                env[String(a[..<eq])] = String(a[a.index(after: eq)...])
-                args.removeFirst()
+        r.register("env", "print environment or run a command with a modified environment") { context in
+            var commandEnvironment = context.environment
+            var arguments = context.arguments
+            if arguments.first == "-i" { commandEnvironment = [:]; arguments.removeFirst() }
+            while let a = arguments.first, let eq = a.firstIndex(of: "="), a.first != "=" {
+                commandEnvironment[String(a[..<eq])] = String(a[a.index(after: eq)...])
+                arguments.removeFirst()
             }
-            if args.isEmpty {
-                for (k, v) in env.sorted(by: { $0.key < $1.key }) { ctx.print("\(k)=\(v)") }
+            if arguments.isEmpty {
+                for (k, v) in commandEnvironment.sorted(by: { $0.key < $1.key }) { context.print("\(k)=\(v)") }
                 return 0
             }
-            let io = ShellIO(stdin: ctx.stdin, stdout: ctx.stdout, stderr: ctx.stderr)
-            return ctx.shell.runCommand(args, io: io, cancellation: ctx.cancellation, environment: env)
+            let streams = StandardStreams(stdin: context.stdin, stdout: context.stdout, stderr: context.stderr)
+            return context.shell.runCommand(arguments, streams: streams, cancellation: context.cancellation, environment: commandEnvironment)
         }
-        r.register("printenv", "print environment variables") { ctx in
-            if ctx.args.isEmpty {
-                for (k, v) in ctx.environment.sorted(by: { $0.key < $1.key }) { ctx.print("\(k)=\(v)") }
+        r.register("printenv", "print environment variables") { context in
+            if context.arguments.isEmpty {
+                for (k, v) in context.environment.sorted(by: { $0.key < $1.key }) { context.print("\(k)=\(v)") }
                 return 0
             }
             var status: Int32 = 0
-            for a in ctx.args { if let v = ctx.environment[a] { ctx.print(v) } else { status = 1 } }
+            for a in context.arguments { if let v = context.environment[a] { context.print(v) } else { status = 1 } }
             return status
         }
 
-        r.register("test", "evaluate a conditional expression") { ctx in TestCommand.evaluate(ctx.args, ctx) }
-        r.register("[", "evaluate a conditional expression") { ctx in
-            var args = ctx.args
-            guard args.last == "]" else { ctx.error("missing `]'"); return 2 }
-            args.removeLast()
-            return TestCommand.evaluate(args, ctx)
+        r.register("test", "evaluate a conditional expression") { context in TestCommand.evaluate(context.arguments, context) }
+        r.register("[", "evaluate a conditional expression") { context in
+            var arguments = context.arguments
+            guard arguments.last == "]" else { context.error("missing `]'"); return 2 }
+            arguments.removeLast()
+            return TestCommand.evaluate(arguments, context)
         }
 
-        r.register("sleep", "pause for a number of seconds (suffixes s, m, h, d)") { ctx in
-            guard !ctx.args.isEmpty else { ctx.error("missing operand"); return 1 }
+        r.register("sleep", "pause for a number of seconds (suffixes s, m, h, d)") { context in
+            guard !context.arguments.isEmpty else { context.error("missing operand"); return 1 }
             var total = 0.0
-            for a in ctx.args {
+            for a in context.arguments {
                 var s = a
-                var mult = 1.0
+                var multiplier = 1.0
                 if let last = s.last, "smhd".contains(last) {
-                    mult = ["s": 1, "m": 60, "h": 3600, "d": 86400][String(last)]!
+                    multiplier = ["s": 1, "m": 60, "h": 3600, "d": 86400][String(last)]!
                     s.removeLast()
                 }
-                guard let v = Double(s) else { ctx.error("invalid time interval '\(a)'"); return 1 }
-                total += v * mult
+                guard let v = Double(s) else { context.error("invalid time interval '\(a)'"); return 1 }
+                total += v * multiplier
             }
-            ctx.stdout.flush()
-            return ctx.cancellation.sleep(total) ? 0 : 130
+            context.stdout.flush()
+            return context.cancellation.sleep(total) ? 0 : 130
         }
 
-        r.register("yes", "repeatedly print a line (default 'y') until interrupted") { ctx in
-            let line = (ctx.args.isEmpty ? "y" : ctx.args.joined(separator: " ")) + "\n"
+        r.register("yes", "repeatedly print a line (default 'y') until interrupted") { context in
+            let line = (context.arguments.isEmpty ? "y" : context.arguments.joined(separator: " ")) + "\n"
             var chunk = ""
             while chunk.utf8.count < 4096 { chunk += line }
             let bytes = Array(chunk.utf8)
-            while !ctx.shouldStop {
-                ctx.stdout.write(bytes)
-                if ctx.stdout.isTerminal { ctx.cancellation.sleep(0.002) }
+            while !context.shouldStop {
+                context.stdout.write(bytes)
+                if context.stdout.isTerminal { context.cancellation.sleep(0.002) }
             }
-            return ctx.isCancelled ? 130 : 0
+            return context.isCancelled ? 130 : 0
         }
 
-        r.register("seq", "print a sequence of numbers") { ctx in
-            let opts = ParsedOptions(ctx.args.map { $0.hasPrefix("-") && Double($0) != nil ? "\u{0}" + $0 : $0 }, flags: "w", withValues: "sf")
-            let nums = opts.operands.map { $0.hasPrefix("\u{0}") ? String($0.dropFirst()) : $0 }
-            let values = nums.compactMap { Double($0) }
-            guard values.count == nums.count, (1...3).contains(values.count) else { ctx.error("invalid arguments"); return 1 }
-            var first = 1.0, inc = 1.0, last = values[0]
+        r.register("seq", "print a sequence of numbers") { context in
+            let options = ParsedOptions(context.arguments.map { $0.hasPrefix("-") && Double($0) != nil ? "\u{0}" + $0 : $0 }, flags: "w", withValues: "sf")
+            let numberTexts = options.operands.map { $0.hasPrefix("\u{0}") ? String($0.dropFirst()) : $0 }
+            let values = numberTexts.compactMap { Double($0) }
+            guard values.count == numberTexts.count, (1...3).contains(values.count) else { context.error("invalid arguments"); return 1 }
+            var first = 1.0, increment = 1.0, last = values[0]
             if values.count == 2 { first = values[0]; last = values[1] }
-            if values.count == 3 { first = values[0]; inc = values[1]; last = values[2] }
-            guard inc != 0 else { ctx.error("invalid zero increment"); return 1 }
-            let sep = opts.value("s").map { ShellFormat.unescape($0).0 } ?? "\n"
-            let isInt = nums.allSatisfy { !$0.contains(".") && !$0.contains("e") }
-            let decimals = nums.map { $0.split(separator: ".").dropFirst().first?.count ?? 0 }.max() ?? 0
+            if values.count == 3 { first = values[0]; increment = values[1]; last = values[2] }
+            guard increment != 0 else { context.error("invalid zero increment"); return 1 }
+            let separator = options.value("s").map { ShellFormat.unescape($0).0 } ?? "\n"
+            let isInteger = numberTexts.allSatisfy { !$0.contains(".") && !$0.contains("e") }
+            let decimals = numberTexts.map { $0.split(separator: ".").dropFirst().first?.count ?? 0 }.max() ?? 0
             var out: [String] = []
             var v = first
             var buffer = ""
             var count = 0
-            while inc > 0 ? v <= last + 1e-9 : v >= last - 1e-9 {
-                if ctx.shouldStop { break }
-                out.append(isInt ? String(Int64(v)) : String(format: "%.\(decimals)f", v))
+            while increment > 0 ? v <= last + 1e-9 : v >= last - 1e-9 {
+                if context.shouldStop { break }
+                out.append(isInteger ? String(Int64(v)) : String(format: "%.\(decimals)f", v))
                 count += 1
-                v = first + Double(count) * inc
-                if out.count >= 1024 { buffer = out.joined(separator: sep) + sep; ctx.stdout.write(buffer); out.removeAll() }
+                v = first + Double(count) * increment
+                if out.count >= 1024 { buffer = out.joined(separator: separator) + separator; context.stdout.write(buffer); out.removeAll() }
             }
-            if opts.has("w"), let width = out.map({ $0.count }).max() {
+            if options.has("w"), let width = out.map({ $0.count }).max() {
                 out = out.map { String(repeating: "0", count: width - $0.count) + $0 }
             }
-            if !out.isEmpty { ctx.stdout.write(out.joined(separator: sep) + "\n") } else if count > 0 && sep != "\n" { ctx.stdout.write("\n") }
+            if !out.isEmpty { context.stdout.write(out.joined(separator: separator) + "\n") } else if count > 0 && separator != "\n" { context.stdout.write("\n") }
             return 0
         }
 
-        r.register("help", "list available commands") { ctx in
-            let cmds = ctx.shell.registry.allCommands.filter { !$0.summary.isEmpty }
-            if let name = ctx.args.first {
-                guard let c = ctx.shell.registry.command(named: name) else { ctx.error("no help topics match '\(name)'"); return 1 }
-                ctx.print("\(c.name): \(c.summary)")
+        r.register("help", "list available commands") { context in
+            let commands = context.shell.registry.allCommands.filter { !$0.summary.isEmpty }
+            if let name = context.arguments.first {
+                guard let c = context.shell.registry.command(named: name) else { context.error("no help topics match '\(name)'"); return 1 }
+                context.print("\(c.name): \(c.summary)")
                 return 0
             }
-            ctx.print("Termux for iOS built-in shell. iOS does not allow running native programs,")
-            ctx.print("so these commands are implemented inside the app:")
-            ctx.print()
-            let width = (cmds.map { $0.name.count }.max() ?? 8) + 2
-            for c in cmds { ctx.print("  " + ShellFormat.pad(c.name, width) + c.summary) }
-            ctx.print()
-            ctx.print("Shell features: pipes |, && ||, ;, redirections > >> < 2>&1, $VAR, $(cmd), $((math)), globs * ?")
+            context.print("Termux for iOS built-in shell. iOS does not allow running native programs,")
+            context.print("so these commands are implemented inside the app:")
+            context.print()
+            let width = (commands.map { $0.name.count }.max() ?? 8) + 2
+            for c in commands { context.print("  " + ShellFormat.pad(c.name, width) + c.summary) }
+            context.print()
+            context.print("Shell features: pipes |, && ||, ;, redirections > >> < 2>&1, $VAR, $(command), $((math)), globs * ?")
             return 0
         }
 
-        let pkgMessage = { (ctx: CommandContext) -> Int32 in
-            ctx.stderr.writeLine("""
-            \(ctx.name): package management is not available on iOS.
+        let packageMessage = { (context: CommandContext) -> Int32 in
+            context.stderr.writeLine("""
+            \(context.name): package management is not available on iOS.
 
             iOS does not allow apps to download and run native binaries, so Termux
             packages (apt/pkg) cannot be installed. The commands in this shell are
@@ -344,9 +343,9 @@ enum ShellBuiltins {
             """)
             return 1
         }
-        r.register("pkg", "explains why packages cannot be installed on iOS", pkgMessage)
-        r.register("apt", "explains why packages cannot be installed on iOS", pkgMessage)
-        r.register("apt-get", "", pkgMessage)
+        r.register("pkg", "explains why packages cannot be installed on iOS", packageMessage)
+        r.register("apt", "explains why packages cannot be installed on iOS", packageMessage)
+        r.register("apt-get", "", packageMessage)
     }
 
     static func quote(_ s: String) -> String {
@@ -356,75 +355,70 @@ enum ShellBuiltins {
 }
 
 extension CommandContext {
-    /// True if `flag` (e.g. "-P") appears among the arguments.
-    func has(_ flag: String) -> Bool { args.contains(flag) }
+    func has(_ flag: String) -> Bool { arguments.contains(flag) }
 }
 
-// MARK: - test / [
-
 enum TestCommand {
-    static func evaluate(_ args: [String], _ ctx: CommandContext) -> Int32 {
-        var p = TestParser(args: args, ctx: ctx)
-        guard let r = p.parseOr(), p.pos == args.count else {
-            if args.isEmpty { return 1 }
-            ctx.error("syntax error"); return 2
+    static func evaluate(_ arguments: [String], _ context: CommandContext) -> Int32 {
+        var p = TestParser(arguments: arguments, context: context)
+        guard let r = p.parseOr(), p.position == arguments.count else {
+            if arguments.isEmpty { return 1 }
+            context.error("syntax error"); return 2
         }
         return r ? 0 : 1
     }
 
     struct TestParser {
-        let args: [String]
-        let ctx: CommandContext
-        var pos = 0
+        let arguments: [String]
+        let context: CommandContext
+        var position = 0
 
         mutating func parseOr() -> Bool? {
             guard var v = parseAnd() else { return nil }
-            while pos < args.count && args[pos] == "-o" { pos += 1; guard let r = parseAnd() else { return nil }; v = v || r }
+            while position < arguments.count && arguments[position] == "-o" { position += 1; guard let r = parseAnd() else { return nil }; v = v || r }
             return v
         }
         mutating func parseAnd() -> Bool? {
             guard var v = parseNot() else { return nil }
-            while pos < args.count && args[pos] == "-a" { pos += 1; guard let r = parseNot() else { return nil }; v = v && r }
+            while position < arguments.count && arguments[position] == "-a" { position += 1; guard let r = parseNot() else { return nil }; v = v && r }
             return v
         }
         mutating func parseNot() -> Bool? {
-            if pos < args.count && args[pos] == "!" && pos + 1 < args.count { pos += 1; return parseNot().map { !$0 } }
+            if position < arguments.count && arguments[position] == "!" && position + 1 < arguments.count { position += 1; return parseNot().map { !$0 } }
             return parsePrimary()
         }
         mutating func parsePrimary() -> Bool? {
-            guard pos < args.count else { return nil }
-            let a = args[pos]
+            guard position < arguments.count else { return nil }
+            let a = arguments[position]
             if a == "(" {
-                pos += 1
+                position += 1
                 let v = parseOr()
-                guard pos < args.count, args[pos] == ")" else { return nil }
-                pos += 1
+                guard position < arguments.count, arguments[position] == ")" else { return nil }
+                position += 1
                 return v
             }
-            // Binary operators
-            if pos + 2 < args.count {
-                let op = args[pos + 1], rhs = args[pos + 2]
-                if let r = binary(a, op, rhs) { pos += 3; return r }
+            if position + 2 < arguments.count {
+                let operation = arguments[position + 1], rightValue = arguments[position + 2]
+                if let r = binary(a, operation, rightValue) { position += 3; return r }
             }
-            // Unary operators
-            if a.hasPrefix("-") && a.count == 2 && pos + 1 < args.count {
-                if let r = unary(a, args[pos + 1]) { pos += 2; return r }
+            if a.hasPrefix("-") && a.count == 2 && position + 1 < arguments.count {
+                if let r = unary(a, arguments[position + 1]) { position += 2; return r }
             }
-            pos += 1
+            position += 1
             return !a.isEmpty
         }
 
-        func binary(_ l: String, _ op: String, _ r: String) -> Bool? {
-            switch op {
+        func binary(_ l: String, _ operation: String, _ r: String) -> Bool? {
+            switch operation {
             case "=", "==": return l == r
             case "!=": return l != r
             case "<": return l < r
             case ">": return l > r
             case "-eq", "-ne", "-lt", "-le", "-gt", "-ge":
                 guard let a = Int64(l.trimmingCharacters(in: .whitespaces)), let b = Int64(r.trimmingCharacters(in: .whitespaces)) else {
-                    ctx.error("integer expression expected"); return false
+                    context.error("integer expression expected"); return false
                 }
-                switch op {
+                switch operation {
                 case "-eq": return a == b
                 case "-ne": return a != b
                 case "-lt": return a < b
@@ -433,18 +427,18 @@ enum TestCommand {
                 default: return a >= b
                 }
             case "-nt", "-ot":
-                let a = FileInfo(path: ctx.resolve(l), follow: true)?.modificationDate
-                let b = FileInfo(path: ctx.resolve(r), follow: true)?.modificationDate
+                let a = FileInfo(path: context.resolve(l), follow: true)?.modificationDate
+                let b = FileInfo(path: context.resolve(r), follow: true)?.modificationDate
                 guard let x = a, let y = b else { return false }
-                return op == "-nt" ? x > y : x < y
+                return operation == "-nt" ? x > y : x < y
             default: return nil
             }
         }
 
-        func unary(_ op: String, _ v: String) -> Bool? {
-            let path = ctx.resolve(v)
-            let fm = FileManager.default
-            switch op {
+        func unary(_ operation: String, _ v: String) -> Bool? {
+            let path = context.resolve(v)
+            let fileManager = FileManager.default
+            switch operation {
             case "-z": return v.isEmpty
             case "-n": return !v.isEmpty
             case "-e": return FileInfo(path: path, follow: true) != nil
@@ -452,75 +446,72 @@ enum TestCommand {
             case "-d": return FileInfo(path: path, follow: true)?.isDirectory ?? false
             case "-L", "-h": return FileInfo(path: path)?.isSymlink ?? false
             case "-s": return (FileInfo(path: path, follow: true)?.size ?? 0) > 0
-            case "-r": return fm.isReadableFile(atPath: path)
-            case "-w": return fm.isWritableFile(atPath: path)
-            case "-x": return fm.isExecutableFile(atPath: path)
-            case "-t": return v == "1" ? ctx.stdout.isTerminal : (v == "0" ? ctx.stdin.isTerminal : false)
+            case "-r": return fileManager.isReadableFile(atPath: path)
+            case "-w": return fileManager.isWritableFile(atPath: path)
+            case "-x": return fileManager.isExecutableFile(atPath: path)
+            case "-t": return v == "1" ? context.stdout.isTerminal : (v == "0" ? context.stdin.isTerminal : false)
             default: return nil
             }
         }
     }
 }
 
-// MARK: - printf
-
 enum Printf {
     static func format(_ format: String, _ arguments: [String]) -> String {
         var out = ""
         var remaining = arguments[...]
-        let fmt = Array(format)
+        let formatCharacters = Array(format)
         var consumedAny = false
         repeat {
             consumedAny = false
             var i = 0
-            while i < fmt.count {
-                let c = fmt[i]
+            while i < formatCharacters.count {
+                let c = formatCharacters[i]
                 if c == "\\" {
-                    // Collect the escape and decode with the shared helper.
                     var j = i + 1
-                    if j < fmt.count {
+                    if j < formatCharacters.count {
                         j += 1
-                        if fmt[i + 1] == "x" || ("0"..."7").contains(fmt[i + 1]) {
-                            while j < fmt.count && j < i + 5 && fmt[j].isHexDigit { j += 1 }
+                        if formatCharacters[i + 1] == "x" || ("0"..."7").contains(formatCharacters[i + 1]) {
+                            while j < formatCharacters.count && j < i + 5 && formatCharacters[j].isHexDigit { j += 1 }
                         }
                     }
-                    let (s, stop) = ShellFormat.unescape(String(fmt[i..<j]))
+                    let (s, stop) = ShellFormat.unescape(String(formatCharacters[i..<j]))
                     out += s
                     if stop { return out }
                     i = j; continue
                 }
                 guard c == "%" else { out.append(c); i += 1; continue }
                 i += 1
-                guard i < fmt.count else { out.append("%"); break }
-                if fmt[i] == "%" { out.append("%"); i += 1; continue }
-                var spec = "%"
-                while i < fmt.count && "-+ #0".contains(fmt[i]) { spec.append(fmt[i]); i += 1 }
-                while i < fmt.count && (fmt[i].isNumber || fmt[i] == "." || fmt[i] == "*") {
-                    if fmt[i] == "*" { spec += remaining.isEmpty ? "0" : remaining.removeFirst(); consumedAny = true } else { spec.append(fmt[i]) }
+                guard i < formatCharacters.count else { out.append("%"); break }
+                if formatCharacters[i] == "%" { out.append("%"); i += 1; continue }
+                var specification = "%"
+                while i < formatCharacters.count && "-+ #0".contains(formatCharacters[i]) { specification.append(formatCharacters[i]); i += 1 }
+                while i < formatCharacters.count && (formatCharacters[i].isNumber || formatCharacters[i] == "." || formatCharacters[i] == "*") {
+                    if formatCharacters[i] == "*" { specification += remaining.isEmpty ? "0" : remaining.removeFirst(); consumedAny = true } else { specification.append(formatCharacters[i]) }
                     i += 1
                 }
-                guard i < fmt.count else { break }
-                let conv = fmt[i]
+                guard i < formatCharacters.count else { break }
+                let conversion = formatCharacters[i]
                 i += 1
-                let arg: String? = remaining.isEmpty ? nil : remaining.removeFirst()
-                if arg != nil { consumedAny = true }
-                switch conv {
+                let argumentText: String? = remaining.isEmpty ? nil : remaining.removeFirst()
+                if argumentText != nil { consumedAny = true }
+                switch conversion {
                 case "d", "i":
-                    out += String(format: spec + "lld", parseInt(arg))
+                    out += String(format: specification + "lld", parseInt(argumentText))
                 case "u":
-                    out += String(format: spec + "llu", UInt64(bitPattern: parseInt(arg)))
+                    out += String(format: specification + "llu", UInt64(bitPattern: parseInt(argumentText)))
                 case "x", "X", "o":
-                    out += String(format: spec + "ll" + String(conv), parseInt(arg))
+                    out += String(format: specification + "ll" + String(conversion), parseInt(argumentText))
                 case "f", "F", "e", "E", "g", "G":
-                    out += String(format: spec + String(conv), Double(arg ?? "0") ?? 0)
+                    out += String(format: specification + String(conversion), Double(argumentText ?? "0") ?? 0)
                 case "c":
-                    out += arg.flatMap { $0.first.map(String.init) } ?? ""
+                    out += argumentText.flatMap { $0.first.map(String.init) } ?? ""
                 case "b":
-                    let (s, _) = ShellFormat.unescape(arg ?? ""); out += pad(s, spec)
+                    let (s, _) = ShellFormat.unescape(argumentText ?? ""); out += pad(s, specification)
                 case "q":
-                    out += ShellBuiltins.quote(arg ?? "")
-                default: // s
-                    out += pad(arg ?? "", spec)
+                    out += ShellBuiltins.quote(argumentText ?? "")
+                default:
+                    out += pad(argumentText ?? "", specification)
                 }
             }
         } while consumedAny && !remaining.isEmpty
@@ -534,13 +525,13 @@ enum Printf {
         return Int64(s) ?? Int64(Double(s) ?? 0)
     }
 
-    private static func pad(_ s: String, _ spec: String) -> String {
-        let body = spec.dropFirst()
+    private static func pad(_ s: String, _ specification: String) -> String {
+        let body = specification.dropFirst()
         let left = body.contains("-")
         let numbers = body.filter { $0.isNumber || $0 == "." }
         let parts = numbers.split(separator: ".", omittingEmptySubsequences: false)
         var value = s
-        if parts.count > 1, let prec = Int(parts[1]) { value = String(value.prefix(prec)) }
+        if parts.count > 1, let precision = Int(parts[1]) { value = String(value.prefix(precision)) }
         guard let w = parts.first.flatMap({ Int($0) }), w > value.count else { return value }
         let padding = String(repeating: " ", count: w - value.count)
         return left ? value + padding : padding + value

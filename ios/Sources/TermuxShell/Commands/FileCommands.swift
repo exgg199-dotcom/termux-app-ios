@@ -1,8 +1,7 @@
 import Foundation
 
-/// File system commands operating on real files via FileManager.
 enum FileCommands {
-    static let fm = FileManager.default
+    static let fileManager = FileManager.default
 
     static func register(_ r: CommandRegistry) {
         r.register("ls", "list directory contents (-l -a -A -h -1 -d -t -S -r -R -F)") { ls($0) }
@@ -20,44 +19,42 @@ enum FileCommands {
         r.register("stat", "display file status") { stat($0) }
         r.register("chmod", "change file mode bits") { chmod($0) }
         r.register("tree", "list directories as a tree (-a -L depth -d)") { tree($0) }
-        r.register("realpath", "print the resolved absolute path") { ctx in
+        r.register("realpath", "print the resolved absolute path") { context in
             var status: Int32 = 0
-            for a in ctx.args where !a.hasPrefix("-") {
-                let p = ctx.resolve(a)
-                if !fm.fileExists(atPath: p) && !ctx.args.contains("-m") { ctx.error("\(a): No such file or directory"); status = 1; continue }
-                ctx.print(URL(fileURLWithPath: p).resolvingSymlinksInPath().path)
+            for a in context.arguments where !a.hasPrefix("-") {
+                let p = context.resolve(a)
+                if !fileManager.fileExists(atPath: p) && !context.arguments.contains("-m") { context.error("\(a): No such file or directory"); status = 1; continue }
+                context.print(URL(fileURLWithPath: p).resolvingSymlinksInPath().path)
             }
             return status
         }
-        r.register("basename", "strip directory and suffix from a file name") { ctx in
-            guard let name = ctx.args.first else { ctx.error("missing operand"); return 1 }
+        r.register("basename", "strip directory and suffix from a file name") { context in
+            guard let name = context.arguments.first else { context.error("missing operand"); return 1 }
             var b = ShellPath.basename(name)
-            if ctx.args.count > 1, b.hasSuffix(ctx.args[1]), b != ctx.args[1] { b = String(b.dropLast(ctx.args[1].count)) }
-            ctx.print(b)
+            if context.arguments.count > 1, b.hasSuffix(context.arguments[1]), b != context.arguments[1] { b = String(b.dropLast(context.arguments[1].count)) }
+            context.print(b)
             return 0
         }
-        r.register("dirname", "strip the last component from a file name") { ctx in
-            guard !ctx.args.isEmpty else { ctx.error("missing operand"); return 1 }
-            for a in ctx.args { ctx.print(ShellPath.dirname(a)) }
+        r.register("dirname", "strip the last component from a file name") { context in
+            guard !context.arguments.isEmpty else { context.error("missing operand"); return 1 }
+            for a in context.arguments { context.print(ShellPath.dirname(a)) }
             return 0
         }
     }
 
     static func errorDescription(_ error: Error) -> String {
-        let ns = error as NSError
-        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSPOSIXErrorDomain {
+        let nativeString = error as NSError
+        if let underlying = nativeString.userInfo[NSUnderlyingErrorKey] as? NSError, underlying.domain == NSPOSIXErrorDomain {
             return String(cString: strerror(Int32(underlying.code)))
         }
-        switch ns.code {
+        switch nativeString.code {
         case NSFileNoSuchFileError, NSFileReadNoSuchFileError: return "No such file or directory"
         case NSFileWriteFileExistsError: return "File exists"
         case NSFileReadNoPermissionError, NSFileWriteNoPermissionError: return "Permission denied"
         case NSFileWriteOutOfSpaceError: return "No space left on device"
-        default: return ns.localizedDescription
+        default: return nativeString.localizedDescription
         }
     }
-
-    // MARK: ls
 
     struct Entry {
         let name: String
@@ -68,7 +65,7 @@ enum FileCommands {
     static func colorize(_ name: String, _ info: FileInfo?, path: String) -> String {
         guard let info = info else { return name }
         if info.isSymlink {
-            let broken = !fm.fileExists(atPath: path)
+            let broken = !fileManager.fileExists(atPath: path)
             return (broken ? ANSI.boldRed : ANSI.boldCyan) + name + ANSI.reset
         }
         if info.isDirectory { return ANSI.boldBlue + name + ANSI.reset }
@@ -97,40 +94,40 @@ enum FileCommands {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM dd  yyyy"; return f
     }()
 
-    static func ls(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "laAh1dtSrRFG", longFlags: [])
-        if let e = opts.error { ctx.error(e); return 2 }
-        let all = opts.has("a"), almostAll = opts.has("A")
-        let long = opts.has("l")
-        let human = opts.has("h")
+    static func ls(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "laAh1dtSrRFG", longFlags: [])
+        if let e = options.error { context.error(e); return 2 }
+        let all = options.has("a"), almostAll = options.has("A")
+        let long = options.has("l")
+        let human = options.has("h")
         let color: Bool = {
-            switch opts.longValues["color"] ?? (opts.longFlags.contains("color") ? "always" : "auto") {
+            switch options.longValues["color"] ?? (options.longFlags.contains("color") ? "always" : "auto") {
             case "always", "yes", "force": return true
             case "never", "no", "none": return false
-            default: return ctx.stdout.isTerminal
+            default: return context.stdout.isTerminal
             }
         }()
-        let onePerLine = opts.has("1") || !ctx.stdout.isTerminal
-        var operands = opts.operands
+        let onePerLine = options.has("1") || !context.stdout.isTerminal
+        var operands = options.operands
         if operands.isEmpty { operands = ["."] }
         var status: Int32 = 0
 
         func sortEntries(_ e: [Entry]) -> [Entry] {
             var s: [Entry]
-            if opts.has("t") {
+            if options.has("t") {
                 s = e.sorted { ($0.info?.modificationDate ?? .distantPast) > ($1.info?.modificationDate ?? .distantPast) }
-            } else if opts.has("S") {
+            } else if options.has("S") {
                 s = e.sorted { ($0.info?.size ?? 0) > ($1.info?.size ?? 0) }
             } else {
                 func key(_ n: String) -> String { String(n.drop(while: { $0 == "." })).lowercased() }
                 s = e.sorted { (key($0.name), $0.name) < (key($1.name), $1.name) }
             }
-            return opts.has("r") ? s.reversed() : s
+            return options.has("r") ? s.reversed() : s
         }
 
         func display(_ e: Entry) -> String {
             var name = color ? colorize(e.name, e.info, path: e.path) : e.name
-            if opts.has("F") { name += classify(e.info) }
+            if options.has("F") { name += classify(e.info) }
             return name
         }
 
@@ -139,7 +136,7 @@ enum FileCommands {
             if long {
                 if showTotal {
                     let blocks = entries.reduce(Int64(0)) { $0 + (($1.info?.size ?? 0) + 4095) / 4096 * 4 }
-                    ctx.print("total \(human ? ShellFormat.humanSize(blocks * 1024) : String(blocks))")
+                    context.print("total \(human ? ShellFormat.humanSize(blocks * 1024) : String(blocks))")
                 }
                 let sixMonthsAgo = Date(timeIntervalSinceNow: -182 * 86400)
                 var rows: [[String]] = []
@@ -149,49 +146,49 @@ enum FileCommands {
                     let date = i.modificationDate > sixMonthsAgo && i.modificationDate < Date(timeIntervalSinceNow: 3600)
                         ? recentFormatter.string(from: i.modificationDate) : oldFormatter.string(from: i.modificationDate)
                     var name = display(e)
-                    if i.isSymlink, let target = try? fm.destinationOfSymbolicLink(atPath: e.path) { name += " -> " + target }
+                    if i.isSymlink, let target = try? fileManager.destinationOfSymbolicLink(atPath: e.path) { name += " -> " + target }
                     rows.append([i.permissionString, String(i.linkCount), i.userName, i.groupName, size, date, name])
                 }
                 let w = (0..<6).map { c in rows.map { $0[c].count }.max() ?? 0 }
                 for row in rows {
                     let line = [row[0], ShellFormat.pad(row[1], w[1], right: true), ShellFormat.pad(row[2], w[2]),
                                 ShellFormat.pad(row[3], w[3]), ShellFormat.pad(row[4], w[4], right: true), row[5], row[6]]
-                    ctx.print(line.joined(separator: " "))
+                    context.print(line.joined(separator: " "))
                 }
             } else if onePerLine {
-                for e in entries { ctx.print(display(e)) }
+                for e in entries { context.print(display(e)) }
             } else {
-                let plain = entries.map { $0.name + (opts.has("F") ? classify($0.info) : "") }
-                ctx.stdout.write(ShellFormat.columns(plain, display: entries.map(display), width: ctx.terminalColumns))
+                let plain = entries.map { $0.name + (options.has("F") ? classify($0.info) : "") }
+                context.stdout.write(ShellFormat.columns(plain, display: entries.map(display), width: context.terminalColumns))
             }
         }
 
         var files: [Entry] = []
-        var dirs: [(String, String)] = []
-        for op in operands {
-            let path = ctx.resolve(op)
+        var directories: [(String, String)] = []
+        for operation in operands {
+            let path = context.resolve(operation)
             guard let info = FileInfo(path: path) else {
-                ctx.error("cannot access '\(op)': No such file or directory"); status = 2; continue
+                context.error("cannot access '\(operation)': No such file or directory"); status = 2; continue
             }
             let followed = info.isSymlink ? FileInfo(path: path, follow: true) : info
-            if (followed?.isDirectory ?? false) && !opts.has("d") && !(info.isSymlink && long) {
-                dirs.append((op, path))
+            if (followed?.isDirectory ?? false) && !options.has("d") && !(info.isSymlink && long) {
+                directories.append((operation, path))
             } else {
-                files.append(Entry(name: op, path: path, info: info))
+                files.append(Entry(name: operation, path: path, info: info))
             }
         }
         printEntries(sortEntries(files), showTotal: false)
-        let showHeaders = operands.count > 1 || opts.has("R")
+        let showHeaders = operands.count > 1 || options.has("R")
         var first = files.isEmpty
-        var queue = dirs
+        var queue = directories
         while !queue.isEmpty {
-            if ctx.shouldStop { break }
+            if context.shouldStop { break }
             let (label, path) = queue.removeFirst()
-            if !first { ctx.print() }
+            if !first { context.print() }
             first = false
-            if showHeaders { ctx.print("\(label):") }
-            guard var names = try? fm.contentsOfDirectory(atPath: path) else {
-                ctx.error("cannot open directory '\(label)': Permission denied"); status = 2; continue
+            if showHeaders { context.print("\(label):") }
+            guard var names = try? fileManager.contentsOfDirectory(atPath: path) else {
+                context.error("cannot open directory '\(label)': Permission denied"); status = 2; continue
             }
             if !all && !almostAll { names = names.filter { !$0.hasPrefix(".") } }
             if all { names += [".", ".."] }
@@ -200,289 +197,276 @@ enum FileCommands {
                 return Entry(name: n, path: p, info: FileInfo(path: p))
             })
             printEntries(entries, showTotal: true)
-            if opts.has("R") {
-                let sub = entries.filter { $0.info?.isDirectory == true && $0.name != "." && $0.name != ".." }
+            if options.has("R") {
+                let subcontext = entries.filter { $0.info?.isDirectory == true && $0.name != "." && $0.name != ".." }
                     .map { (label == "." ? "./" + $0.name : (label.hasSuffix("/") ? label + $0.name : label + "/" + $0.name), $0.path) }
-                queue.insert(contentsOf: sub, at: 0)
+                queue.insert(contentsOf: subcontext, at: 0)
             }
         }
         return status
     }
 
-    // MARK: cat
-
-    static func cat(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "nbuvAeEtT")
-        if let e = opts.error { ctx.error(e); return 1 }
-        let number = opts.has("n") || opts.has("b")
-        var lineNo = 0
-        return ctx.forEachInput(opts.operands) { input, _ in
+    static func cat(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "nbuvAeEtT")
+        if let e = options.error { context.error(e); return 1 }
+        let number = options.has("n") || options.has("b")
+        var lineNumber = 0
+        return context.forEachInput(options.operands) { input, _ in
             if number {
                 let reader = LineReader(input)
                 while let line = reader.nextLineBytes() {
-                    if ctx.shouldStop { break }
-                    if opts.has("b") && line.isEmpty { ctx.stdout.write("\n"); continue }
-                    lineNo += 1
-                    ctx.stdout.write(ShellFormat.pad(String(lineNo), 6, right: true) + "\t")
-                    ctx.stdout.write(line + [0x0A])
+                    if context.shouldStop { break }
+                    if options.has("b") && line.isEmpty { context.stdout.write("\n"); continue }
+                    lineNumber += 1
+                    context.stdout.write(ShellFormat.pad(String(lineNumber), 6, right: true) + "\t")
+                    context.stdout.write(line + [0x0A])
                 }
             } else {
-                while !ctx.shouldStop, let chunk = input.read(maxLength: 65536) { ctx.stdout.write(chunk) }
+                while !context.shouldStop, let chunk = input.read(maxLength: 65536) { context.stdout.write(chunk) }
             }
         }
     }
 
-    // MARK: mkdir / rmdir
-
-    static func mkdir(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "pv", withValues: "m")
-        if let e = opts.error { ctx.error(e); return 1 }
-        guard !opts.operands.isEmpty else { ctx.error("missing operand"); return 1 }
+    static func mkdir(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "pv", withValues: "m")
+        if let e = options.error { context.error(e); return 1 }
+        guard !options.operands.isEmpty else { context.error("missing operand"); return 1 }
         var status: Int32 = 0
-        for d in opts.operands {
-            let path = ctx.resolve(d)
-            var isDir: ObjCBool = false
-            if fm.fileExists(atPath: path, isDirectory: &isDir) {
-                if opts.has("p") && isDir.boolValue { continue }
-                ctx.error("cannot create directory '\(d)': File exists"); status = 1; continue
+        for d in options.operands {
+            let path = context.resolve(d)
+            var isDirectory: ObjCBool = false
+            if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {
+                if options.has("p") && isDirectory.boolValue { continue }
+                context.error("cannot create directory '\(d)': File exists"); status = 1; continue
             }
-            if !opts.has("p") && !fm.fileExists(atPath: ShellPath.dirname(path)) {
-                ctx.error("cannot create directory '\(d)': No such file or directory"); status = 1; continue
+            if !options.has("p") && !fileManager.fileExists(atPath: ShellPath.dirname(path)) {
+                context.error("cannot create directory '\(d)': No such file or directory"); status = 1; continue
             }
             do {
-                var attrs: [FileAttributeKey: Any]? = nil
-                if let m = opts.value("m"), let mode = Int(m, radix: 8) { attrs = [.posixPermissions: mode] }
-                try fm.createDirectory(atPath: path, withIntermediateDirectories: opts.has("p"), attributes: attrs)
-                if opts.has("v") { ctx.print("mkdir: created directory '\(d)'") }
+                var attributes: [FileAttributeKey: Any]? = nil
+                if let m = options.value("m"), let mode = Int(m, radix: 8) { attributes = [.posixPermissions: mode] }
+                try fileManager.createDirectory(atPath: path, withIntermediateDirectories: options.has("p"), attributes: attributes)
+                if options.has("v") { context.print("mkdir: created directory '\(d)'") }
             } catch {
-                ctx.error("cannot create directory '\(d)': \(errorDescription(error))"); status = 1
+                context.error("cannot create directory '\(d)': \(errorDescription(error))"); status = 1
             }
         }
         return status
     }
 
-    static func rmdir(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "pv")
-        guard !opts.operands.isEmpty else { ctx.error("missing operand"); return 1 }
+    static func rmdir(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "pv")
+        guard !options.operands.isEmpty else { context.error("missing operand"); return 1 }
         var status: Int32 = 0
-        for d in opts.operands {
-            let path = ctx.resolve(d)
-            guard let info = FileInfo(path: path) else { ctx.error("failed to remove '\(d)': No such file or directory"); status = 1; continue }
-            guard info.isDirectory else { ctx.error("failed to remove '\(d)': Not a directory"); status = 1; continue }
-            if let c = try? fm.contentsOfDirectory(atPath: path), !c.isEmpty {
-                ctx.error("failed to remove '\(d)': Directory not empty"); status = 1; continue
+        for d in options.operands {
+            let path = context.resolve(d)
+            guard let info = FileInfo(path: path) else { context.error("failed to remove '\(d)': No such file or directory"); status = 1; continue }
+            guard info.isDirectory else { context.error("failed to remove '\(d)': Not a directory"); status = 1; continue }
+            if let c = try? fileManager.contentsOfDirectory(atPath: path), !c.isEmpty {
+                context.error("failed to remove '\(d)': Directory not empty"); status = 1; continue
             }
-            do { try fm.removeItem(atPath: path) } catch { ctx.error("failed to remove '\(d)': \(errorDescription(error))"); status = 1 }
+            do { try fileManager.removeItem(atPath: path) } catch { context.error("failed to remove '\(d)': \(errorDescription(error))"); status = 1 }
         }
         return status
     }
 
-    // MARK: rm
-
-    static func rm(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "rRfvid")
-        if let e = opts.error { ctx.error(e); return 1 }
-        let force = opts.has("f"), recursive = opts.has("r") || opts.has("R")
-        if opts.operands.isEmpty { if force { return 0 }; ctx.error("missing operand"); return 1 }
+    static func rm(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "rRfvid")
+        if let e = options.error { context.error(e); return 1 }
+        let force = options.has("f"), recursive = options.has("r") || options.has("R")
+        if options.operands.isEmpty { if force { return 0 }; context.error("missing operand"); return 1 }
         var status: Int32 = 0
-        for f in opts.operands {
-            let path = ctx.resolve(f)
-            if path == "/" || path == ctx.homeDirectory && f != "." && recursive && !force {
-                ctx.error("refusing to remove '\(f)'"); status = 1; continue
+        for f in options.operands {
+            let path = context.resolve(f)
+            if path == "/" || path == context.homeDirectory && f != "." && recursive && !force {
+                context.error("refusing to remove '\(f)'"); status = 1; continue
             }
             if ShellPath.basename(f) == "." || ShellPath.basename(f) == ".." {
-                ctx.error("refusing to remove '.' or '..' directory: skipping '\(f)'"); status = 1; continue
+                context.error("refusing to remove '.' or '..' directory: skipping '\(f)'"); status = 1; continue
             }
             guard let info = FileInfo(path: path) else {
-                if !force { ctx.error("cannot remove '\(f)': No such file or directory"); status = 1 }
+                if !force { context.error("cannot remove '\(f)': No such file or directory"); status = 1 }
                 continue
             }
             if info.isDirectory && !recursive {
-                if opts.has("d"), (try? fm.contentsOfDirectory(atPath: path))?.isEmpty == true {
-                    try? fm.removeItem(atPath: path); continue
+                if options.has("d"), (try? fileManager.contentsOfDirectory(atPath: path))?.isEmpty == true {
+                    try? fileManager.removeItem(atPath: path); continue
                 }
-                ctx.error("cannot remove '\(f)': Is a directory"); status = 1; continue
+                context.error("cannot remove '\(f)': Is a directory"); status = 1; continue
             }
             do {
-                try fm.removeItem(atPath: path)
-                if opts.has("v") { ctx.print("removed '\(f)'") }
+                try fileManager.removeItem(atPath: path)
+                if options.has("v") { context.print("removed '\(f)'") }
             } catch {
-                ctx.error("cannot remove '\(f)': \(errorDescription(error))"); status = 1
+                context.error("cannot remove '\(f)': \(errorDescription(error))"); status = 1
             }
         }
         return status
     }
 
-    // MARK: cp / mv
-
-    static func cp(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "rRafvnpi")
-        if let e = opts.error { ctx.error(e); return 1 }
-        let recursive = opts.has("r") || opts.has("R") || opts.has("a")
-        var ops = opts.operands
-        guard ops.count >= 2 else { ctx.error(ops.isEmpty ? "missing file operand" : "missing destination file operand after '\(ops[0])'"); return 1 }
-        let dest = ops.removeLast()
-        let destPath = ctx.resolve(dest)
-        let destIsDir = FileInfo(path: destPath, follow: true)?.isDirectory ?? false
-        if ops.count > 1 && !destIsDir { ctx.error("target '\(dest)' is not a directory"); return 1 }
+    static func cp(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "rRafvnpi")
+        if let e = options.error { context.error(e); return 1 }
+        let recursive = options.has("r") || options.has("R") || options.has("a")
+        var operandList = options.operands
+        guard operandList.count >= 2 else { context.error(operandList.isEmpty ? "missing file operand" : "missing destination file operand after '\(operandList[0])'"); return 1 }
+        let destination = operandList.removeLast()
+        let destinationPath = context.resolve(destination)
+        let destinationIsDirectory = FileInfo(path: destinationPath, follow: true)?.isDirectory ?? false
+        if operandList.count > 1 && !destinationIsDirectory { context.error("target '\(destination)' is not a directory"); return 1 }
         var status: Int32 = 0
-        for src in ops {
-            let srcPath = ctx.resolve(src)
-            guard let info = FileInfo(path: srcPath, follow: true) else {
-                ctx.error("cannot stat '\(src)': No such file or directory"); status = 1; continue
+        for source in operandList {
+            let sourcePath = context.resolve(source)
+            guard let info = FileInfo(path: sourcePath, follow: true) else {
+                context.error("cannot stat '\(source)': No such file or directory"); status = 1; continue
             }
-            if info.isDirectory && !recursive { ctx.error("-r not specified; omitting directory '\(src)'"); status = 1; continue }
-            let target = destIsDir ? destPath + "/" + ShellPath.basename(srcPath) : destPath
-            if target == srcPath { ctx.error("'\(src)' and '\(dest)' are the same file"); status = 1; continue }
-            if info.isDirectory && (target + "/").hasPrefix(srcPath + "/") {
-                ctx.error("cannot copy a directory, '\(src)', into itself"); status = 1; continue
+            if info.isDirectory && !recursive { context.error("-r not specified; omitting directory '\(source)'"); status = 1; continue }
+            let target = destinationIsDirectory ? destinationPath + "/" + ShellPath.basename(sourcePath) : destinationPath
+            if target == sourcePath { context.error("'\(source)' and '\(destination)' are the same file"); status = 1; continue }
+            if info.isDirectory && (target + "/").hasPrefix(sourcePath + "/") {
+                context.error("cannot copy a directory, '\(source)', into itself"); status = 1; continue
             }
             do {
                 if let existing = FileInfo(path: target) {
-                    if opts.has("n") { continue }
+                    if options.has("n") { continue }
                     if existing.isDirectory && info.isDirectory {
-                        // Merge: copy children into the existing directory.
-                        for child in try fm.contentsOfDirectory(atPath: srcPath) {
-                            let sub = CommandContext(argumentVector: ["cp", "-r", srcPath + "/" + child, target], stdin: ctx.stdin, stdout: ctx.stdout,
-                                                     stderr: ctx.stderr, shell: ctx.shell, cancellation: ctx.cancellation,
-                                                     environment: ctx.environment, currentDirectory: ctx.currentDirectory)
-                            if cp(sub) != 0 { status = 1 }
+                        for child in try fileManager.contentsOfDirectory(atPath: sourcePath) {
+                            let subcontext = CommandContext(argumentVector: ["cp", "-r", sourcePath + "/" + child, target], stdin: context.stdin, stdout: context.stdout,
+                                                     stderr: context.stderr, shell: context.shell, cancellation: context.cancellation,
+                                                     environment: context.environment, currentDirectory: context.currentDirectory)
+                            if cp(subcontext) != 0 { status = 1 }
                         }
                         continue
                     }
-                    if existing.isDirectory { ctx.error("cannot overwrite directory '\(target)' with non-directory"); status = 1; continue }
-                    try fm.removeItem(atPath: target)
+                    if existing.isDirectory { context.error("cannot overwrite directory '\(target)' with non-directory"); status = 1; continue }
+                    try fileManager.removeItem(atPath: target)
                 }
-                try fm.copyItem(atPath: srcPath, toPath: target)
-                if opts.has("v") { ctx.print("'\(src)' -> '\(target)'") }
+                try fileManager.copyItem(atPath: sourcePath, toPath: target)
+                if options.has("v") { context.print("'\(source)' -> '\(target)'") }
             } catch {
-                ctx.error("cannot copy '\(src)': \(errorDescription(error))"); status = 1
+                context.error("cannot copy '\(source)': \(errorDescription(error))"); status = 1
             }
         }
         return status
     }
 
-    static func mv(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "fvni")
-        if let e = opts.error { ctx.error(e); return 1 }
-        var ops = opts.operands
-        guard ops.count >= 2 else { ctx.error(ops.isEmpty ? "missing file operand" : "missing destination file operand after '\(ops[0])'"); return 1 }
-        let dest = ops.removeLast()
-        let destPath = ctx.resolve(dest)
-        let destIsDir = FileInfo(path: destPath, follow: true)?.isDirectory ?? false
-        if ops.count > 1 && !destIsDir { ctx.error("target '\(dest)' is not a directory"); return 1 }
+    static func mv(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "fvni")
+        if let e = options.error { context.error(e); return 1 }
+        var operandList = options.operands
+        guard operandList.count >= 2 else { context.error(operandList.isEmpty ? "missing file operand" : "missing destination file operand after '\(operandList[0])'"); return 1 }
+        let destination = operandList.removeLast()
+        let destinationPath = context.resolve(destination)
+        let destinationIsDirectory = FileInfo(path: destinationPath, follow: true)?.isDirectory ?? false
+        if operandList.count > 1 && !destinationIsDirectory { context.error("target '\(destination)' is not a directory"); return 1 }
         var status: Int32 = 0
-        for src in ops {
-            let srcPath = ctx.resolve(src)
-            guard FileInfo(path: srcPath) != nil else { ctx.error("cannot stat '\(src)': No such file or directory"); status = 1; continue }
-            let target = destIsDir ? destPath + "/" + ShellPath.basename(srcPath) : destPath
-            if target == srcPath { continue }
-            if (target + "/").hasPrefix(srcPath + "/") { ctx.error("cannot move '\(src)' to a subdirectory of itself"); status = 1; continue }
+        for source in operandList {
+            let sourcePath = context.resolve(source)
+            guard FileInfo(path: sourcePath) != nil else { context.error("cannot stat '\(source)': No such file or directory"); status = 1; continue }
+            let target = destinationIsDirectory ? destinationPath + "/" + ShellPath.basename(sourcePath) : destinationPath
+            if target == sourcePath { continue }
+            if (target + "/").hasPrefix(sourcePath + "/") { context.error("cannot move '\(source)' to a subdirectory of itself"); status = 1; continue }
             do {
                 if let existing = FileInfo(path: target) {
-                    if opts.has("n") { continue }
-                    if existing.isDirectory, let c = try? fm.contentsOfDirectory(atPath: target), !c.isEmpty {
-                        ctx.error("cannot move '\(src)' to '\(target)': Directory not empty"); status = 1; continue
+                    if options.has("n") { continue }
+                    if existing.isDirectory, let c = try? fileManager.contentsOfDirectory(atPath: target), !c.isEmpty {
+                        context.error("cannot move '\(source)' to '\(target)': Directory not empty"); status = 1; continue
                     }
-                    try fm.removeItem(atPath: target)
+                    try fileManager.removeItem(atPath: target)
                 }
-                try fm.moveItem(atPath: srcPath, toPath: target)
-                if opts.has("v") { ctx.print("renamed '\(src)' -> '\(target)'") }
+                try fileManager.moveItem(atPath: sourcePath, toPath: target)
+                if options.has("v") { context.print("renamed '\(source)' -> '\(target)'") }
             } catch {
-                ctx.error("cannot move '\(src)' to '\(dest)': \(errorDescription(error))"); status = 1
+                context.error("cannot move '\(source)' to '\(destination)': \(errorDescription(error))"); status = 1
             }
         }
         return status
     }
 
-    // MARK: touch / ln
-
-    static func touch(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "cam")
-        guard !opts.operands.isEmpty else { ctx.error("missing file operand"); return 1 }
+    static func touch(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "cam")
+        guard !options.operands.isEmpty else { context.error("missing file operand"); return 1 }
         var status: Int32 = 0
-        for f in opts.operands {
-            let path = ctx.resolve(f)
-            if fm.fileExists(atPath: path) {
-                do { try fm.setAttributes([.modificationDate: Date()], ofItemAtPath: path) }
-                catch { ctx.error("setting times of '\(f)': \(errorDescription(error))"); status = 1 }
-            } else if !opts.has("c") {
-                if !fm.createFile(atPath: path, contents: nil) {
-                    let reason = fm.fileExists(atPath: ShellPath.dirname(path)) ? "Permission denied" : "No such file or directory"
-                    ctx.error("cannot touch '\(f)': \(reason)"); status = 1
+        for f in options.operands {
+            let path = context.resolve(f)
+            if fileManager.fileExists(atPath: path) {
+                do { try fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: path) }
+                catch { context.error("setting times of '\(f)': \(errorDescription(error))"); status = 1 }
+            } else if !options.has("c") {
+                if !fileManager.createFile(atPath: path, contents: nil) {
+                    let reason = fileManager.fileExists(atPath: ShellPath.dirname(path)) ? "Permission denied" : "No such file or directory"
+                    context.error("cannot touch '\(f)': \(reason)"); status = 1
                 }
             }
         }
         return status
     }
 
-    static func ln(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "sfnv")
-        if let e = opts.error { ctx.error(e); return 1 }
-        var ops = opts.operands
-        guard !ops.isEmpty else { ctx.error("missing file operand"); return 1 }
-        if ops.count == 1 { ops.append(ShellPath.basename(ops[0])) }
-        let dest = ops.removeLast()
-        var destPath = ctx.resolve(dest)
-        let destIsDir = !opts.has("n") && (FileInfo(path: destPath, follow: true)?.isDirectory ?? false)
+    static func ln(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "sfnv")
+        if let e = options.error { context.error(e); return 1 }
+        var operandList = options.operands
+        guard !operandList.isEmpty else { context.error("missing file operand"); return 1 }
+        if operandList.count == 1 { operandList.append(ShellPath.basename(operandList[0])) }
+        let destination = operandList.removeLast()
+        var destinationPath = context.resolve(destination)
+        let destinationIsDirectory = !options.has("n") && (FileInfo(path: destinationPath, follow: true)?.isDirectory ?? false)
         var status: Int32 = 0
-        for target in ops {
-            let linkPath = destIsDir ? destPath + "/" + ShellPath.basename(target) : destPath
+        for target in operandList {
+            let linkPath = destinationIsDirectory ? destinationPath + "/" + ShellPath.basename(target) : destinationPath
             if FileInfo(path: linkPath) != nil {
-                if opts.has("f") { try? fm.removeItem(atPath: linkPath) }
-                else { ctx.error("failed to create link '\(dest)': File exists"); status = 1; continue }
+                if options.has("f") { try? fileManager.removeItem(atPath: linkPath) }
+                else { context.error("failed to create link '\(destination)': File exists"); status = 1; continue }
             }
             do {
-                if opts.has("s") {
-                    try fm.createSymbolicLink(atPath: linkPath, withDestinationPath: target)
+                if options.has("s") {
+                    try fileManager.createSymbolicLink(atPath: linkPath, withDestinationPath: target)
                 } else {
-                    try fm.linkItem(atPath: ctx.resolve(target), toPath: linkPath)
+                    try fileManager.linkItem(atPath: context.resolve(target), toPath: linkPath)
                 }
-                if opts.has("v") { ctx.print("'\(linkPath)' -> '\(target)'") }
+                if options.has("v") { context.print("'\(linkPath)' -> '\(target)'") }
             } catch {
-                ctx.error("failed to create link '\(dest)' -> '\(target)': \(errorDescription(error))"); status = 1
+                context.error("failed to create link '\(destination)' -> '\(target)': \(errorDescription(error))"); status = 1
             }
-            destPath = ctx.resolve(dest)
+            destinationPath = context.resolve(destination)
         }
         return status
     }
 
-    // MARK: find
-
-    static func find(_ ctx: CommandContext) -> Int32 {
-        var args = ctx.args
+    static func find(_ context: CommandContext) -> Int32 {
+        var arguments = context.arguments
         var roots: [String] = []
-        while let a = args.first, !a.hasPrefix("-"), a != "!", a != "(" { roots.append(a); args.removeFirst() }
+        while let a = arguments.first, !a.hasPrefix("-"), a != "!", a != "(" { roots.append(a); arguments.removeFirst() }
         if roots.isEmpty { roots = ["."] }
-        var namePatterns: [(String, Bool, Bool)] = [] // (pattern, ignoreCase, negate)
+        var namePatterns: [(String, Bool, Bool)] = []
         var type: Character?
         var maxDepth = Int.max, minDepth = 0
         var pathPatterns: [String] = []
         var negateNext = false
         var i = 0
-        while i < args.count {
-            let a = args[i]
-            func value() -> String? { i += 1; return i < args.count ? args[i] : nil }
+        while i < arguments.count {
+            let a = arguments[i]
+            func value() -> String? { i += 1; return i < arguments.count ? arguments[i] : nil }
             switch a {
             case "!", "-not": negateNext = true; i += 1; continue
             case "-name", "-iname":
-                guard let v = value() else { ctx.error("missing argument to `\(a)'"); return 1 }
+                guard let v = value() else { context.error("missing argument to `\(a)'"); return 1 }
                 namePatterns.append((v, a == "-iname", negateNext))
             case "-path", "-wholename":
-                guard let v = value() else { ctx.error("missing argument to `\(a)'"); return 1 }
+                guard let v = value() else { context.error("missing argument to `\(a)'"); return 1 }
                 pathPatterns.append(v)
             case "-type":
-                guard let v = value(), let c = v.first else { ctx.error("missing argument to `-type'"); return 1 }
+                guard let v = value(), let c = v.first else { context.error("missing argument to `-type'"); return 1 }
                 type = c
             case "-maxdepth":
-                guard let v = value(), let n = Int(v) else { ctx.error("invalid argument to -maxdepth"); return 1 }
+                guard let v = value(), let n = Int(v) else { context.error("invalid argument to -maxdepth"); return 1 }
                 maxDepth = n
             case "-mindepth":
-                guard let v = value(), let n = Int(v) else { ctx.error("invalid argument to -mindepth"); return 1 }
+                guard let v = value(), let n = Int(v) else { context.error("invalid argument to -mindepth"); return 1 }
                 minDepth = n
             case "-print", "-a", "-and": break
             default:
-                ctx.error("unknown predicate `\(a)'"); return 1
+                context.error("unknown predicate `\(a)'"); return 1
             }
             negateNext = false
             i += 1
@@ -498,106 +482,102 @@ enum FileCommands {
                 default: if info.typeChar != t { return false }
                 }
             }
-            for (p, ic, neg) in namePatterns where Glob.match(p, name, ignoreCase: ic) == neg { return false }
+            for (p, ignoringCase, negated) in namePatterns where Glob.match(p, name, ignoreCase: ignoringCase) == negated { return false }
             for p in pathPatterns where !Glob.match(p, display) { return false }
             return true
         }
         func walk(_ display: String, _ path: String, _ depth: Int) {
-            if ctx.shouldStop { return }
+            if context.shouldStop { return }
             guard let info = FileInfo(path: path) else { return }
-            if matches(display, ShellPath.basename(display), info, depth) { ctx.print(display) }
+            if matches(display, ShellPath.basename(display), info, depth) { context.print(display) }
             guard info.isDirectory, depth < maxDepth else { return }
-            guard let children = try? fm.contentsOfDirectory(atPath: path) else {
-                ctx.error("'\(display)': Permission denied"); status = 1; return
+            guard let children = try? fileManager.contentsOfDirectory(atPath: path) else {
+                context.error("'\(display)': Permission denied"); status = 1; return
             }
             for c in children.sorted() {
                 walk(display.hasSuffix("/") ? display + c : display + "/" + c, path == "/" ? "/" + c : path + "/" + c, depth + 1)
             }
         }
         for r in roots {
-            let p = ctx.resolve(r)
-            guard FileInfo(path: p) != nil else { ctx.error("'\(r)': No such file or directory"); status = 1; continue }
+            let p = context.resolve(r)
+            guard FileInfo(path: p) != nil else { context.error("'\(r)': No such file or directory"); status = 1; continue }
             walk(r, p, 0)
         }
         return status
     }
 
-    // MARK: du / df
-
-    static func diskUsage(_ path: String, _ ctx: CommandContext, visit: ((String, Int64) -> Void)?, display: String) -> Int64 {
-        guard !ctx.shouldStop, let info = FileInfo(path: path) else { return 0 }
+    static func diskUsage(_ path: String, _ context: CommandContext, visit: ((String, Int64) -> Void)?, display: String) -> Int64 {
+        guard !context.shouldStop, let info = FileInfo(path: path) else { return 0 }
         var total = (info.size + 4095) / 4096 * 4096
-        if info.isDirectory, let children = try? fm.contentsOfDirectory(atPath: path) {
+        if info.isDirectory, let children = try? fileManager.contentsOfDirectory(atPath: path) {
             for c in children.sorted() {
-                total += diskUsage(path + "/" + c, ctx, visit: visit, display: display.hasSuffix("/") ? display + c : display + "/" + c)
+                total += diskUsage(path + "/" + c, context, visit: visit, display: display.hasSuffix("/") ? display + c : display + "/" + c)
             }
             visit?(display, total)
         }
         return total
     }
 
-    static func du(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "hsacSkm", withValues: "d")
-        if let e = opts.error { ctx.error(e); return 1 }
-        let roots = opts.operands.isEmpty ? ["."] : opts.operands
-        func fmt(_ bytes: Int64) -> String {
-            if opts.has("h") { return ShellFormat.humanSize(bytes) }
-            if opts.has("m") { return String((bytes + 1048575) / 1048576) }
+    static func du(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "hsacSkm", withValues: "d")
+        if let e = options.error { context.error(e); return 1 }
+        let roots = options.operands.isEmpty ? ["."] : options.operands
+        func formatCharacters(_ bytes: Int64) -> String {
+            if options.has("h") { return ShellFormat.humanSize(bytes) }
+            if options.has("m") { return String((bytes + 1048575) / 1048576) }
             return String((bytes + 1023) / 1024)
         }
         var grand: Int64 = 0
         var status: Int32 = 0
-        let maxDepth = opts.value("d").flatMap { Int($0) }
+        let maxDepth = options.value("d").flatMap { Int($0) }
         for r in roots {
-            let p = ctx.resolve(r)
-            guard let info = FileInfo(path: p) else { ctx.error("cannot access '\(r)': No such file or directory"); status = 1; continue }
+            let p = context.resolve(r)
+            guard let info = FileInfo(path: p) else { context.error("cannot access '\(r)': No such file or directory"); status = 1; continue }
             let rootDepth = r.split(separator: "/").count
-            let total = diskUsage(p, ctx, visit: opts.has("s") ? nil : { display, size in
+            let total = diskUsage(p, context, visit: options.has("s") ? nil : { display, size in
                 if display == r { return }
-                if let md = maxDepth, display.split(separator: "/").count - rootDepth > md { return }
-                ctx.print(fmt(size) + "\t" + display)
+                if let depthLimit = maxDepth, display.split(separator: "/").count - rootDepth > depthLimit { return }
+                context.print(formatCharacters(size) + "\t" + display)
             }, display: r)
             _ = info
-            ctx.print(fmt(total) + "\t" + r)
+            context.print(formatCharacters(total) + "\t" + r)
             grand += total
         }
-        if opts.has("c") { ctx.print(fmt(grand) + "\ttotal") }
+        if options.has("c") { context.print(formatCharacters(grand) + "\ttotal") }
         return status
     }
 
-    static func df(_ ctx: CommandContext) -> Int32 {
-        let human = ctx.args.contains("-h")
-        let paths = ctx.args.filter { !$0.hasPrefix("-") }
-        func fmt(_ b: Int64) -> String { human ? ShellFormat.humanSize(b) : String(b / 1024) }
+    static func df(_ context: CommandContext) -> Int32 {
+        let human = context.arguments.contains("-h")
+        let paths = context.arguments.filter { !$0.hasPrefix("-") }
+        func formatCharacters(_ b: Int64) -> String { human ? ShellFormat.humanSize(b) : String(b / 1024) }
         var rows: [[String]] = [["Filesystem", human ? "Size" : "1K-blocks", "Used", "Available", "Use%", "Mounted on"]]
-        for p in paths.isEmpty ? [ctx.homeDirectory] : paths.map({ ctx.resolve($0) }) {
-            guard let attrs = try? fm.attributesOfFileSystem(forPath: p) else { ctx.error("\(p): No such file or directory"); continue }
-            let size = (attrs[.systemSize] as? NSNumber)?.int64Value ?? 0
-            let free = (attrs[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
+        for p in paths.isEmpty ? [context.homeDirectory] : paths.map({ context.resolve($0) }) {
+            guard let attributes = try? fileManager.attributesOfFileSystem(forPath: p) else { context.error("\(p): No such file or directory"); continue }
+            let size = (attributes[.systemSize] as? NSNumber)?.int64Value ?? 0
+            let free = (attributes[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
             let used = size - free
-            let pct = size > 0 ? Int((Double(used) / Double(size) * 100).rounded(.up)) : 0
-            rows.append([paths.isEmpty ? "app-sandbox" : "-", fmt(size), fmt(used), fmt(free), "\(pct)%", ShellPath.abbreviate(p, home: ctx.homeDirectory)])
+            let percentage = size > 0 ? Int((Double(used) / Double(size) * 100).rounded(.up)) : 0
+            rows.append([paths.isEmpty ? "app-sandbox" : "-", formatCharacters(size), formatCharacters(used), formatCharacters(free), "\(percentage)%", ShellPath.abbreviate(p, home: context.homeDirectory)])
         }
         let w = (0..<6).map { c in rows.map { $0[c].count }.max() ?? 0 }
         for row in rows {
-            ctx.print((0..<6).map { c in c == 5 ? row[c] : ShellFormat.pad(row[c], w[c], right: c > 0) }.joined(separator: " "))
+            context.print((0..<6).map { c in c == 5 ? row[c] : ShellFormat.pad(row[c], w[c], right: c > 0) }.joined(separator: " "))
         }
         return 0
     }
 
-    // MARK: stat / chmod
-
-    static func stat(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "L", withValues: "c")
-        guard !opts.operands.isEmpty else { ctx.error("missing operand"); return 1 }
+    static func stat(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "L", withValues: "c")
+        guard !options.operands.isEmpty else { context.error("missing operand"); return 1 }
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSSSSS Z"
         var status: Int32 = 0
-        for a in opts.operands {
-            let path = ctx.resolve(a)
-            guard let i = FileInfo(path: path, follow: opts.has("L")) else {
-                ctx.error("cannot stat '\(a)': No such file or directory"); status = 1; continue
+        for a in options.operands {
+            let path = context.resolve(a)
+            guard let i = FileInfo(path: path, follow: options.has("L")) else {
+                context.error("cannot stat '\(a)': No such file or directory"); status = 1; continue
             }
             let type: String
             switch i.typeChar {
@@ -609,7 +589,7 @@ enum FileCommands {
             case "b": type = "block special file"
             default: type = i.size == 0 ? "regular empty file" : "regular file"
             }
-            if let format = opts.value("c") {
+            if let format = options.value("c") {
                 var out = ""
                 var it = format.makeIterator()
                 while let c = it.next() {
@@ -622,8 +602,8 @@ enum FileCommands {
                     case "F": out += type
                     case "U": out += i.userName
                     case "G": out += i.groupName
-                    case "u": out += String(i.uid)
-                    case "g": out += String(i.gid)
+                    case "u": out += String(i.userIdentifier)
+                    case "g": out += String(i.groupIdentifier)
                     case "h": out += String(i.linkCount)
                     case "Y": out += String(Int(i.modificationDate.timeIntervalSince1970))
                     case "y": out += f.string(from: i.modificationDate)
@@ -631,48 +611,48 @@ enum FileCommands {
                     default: out.append("%"); out.append(n)
                     }
                 }
-                ctx.print(out)
+                context.print(out)
                 continue
             }
             var name = "'\(a)'"
-            if i.isSymlink, let t = try? fm.destinationOfSymbolicLink(atPath: path) { name += " -> '\(t)'" }
-            ctx.print("  File: \(name)")
-            ctx.print("  Size: \(ShellFormat.pad(String(i.size), 15))Type: \(type)")
-            ctx.print(" Links: \(i.linkCount)")
-            ctx.print("Access: (\(String(format: "%04o", i.permissions))/\(i.permissionString))  Uid: (\(i.uid)/\(i.userName))   Gid: (\(i.gid)/\(i.groupName))")
-            ctx.print("Modify: \(f.string(from: i.modificationDate))")
+            if i.isSymlink, let t = try? fileManager.destinationOfSymbolicLink(atPath: path) { name += " -> '\(t)'" }
+            context.print("  File: \(name)")
+            context.print("  Size: \(ShellFormat.pad(String(i.size), 15))Type: \(type)")
+            context.print(" Links: \(i.linkCount)")
+            context.print("Access: (\(String(format: "%04o", i.permissions))/\(i.permissionString))  Uid: (\(i.userIdentifier)/\(i.userName))   Gid: (\(i.groupIdentifier)/\(i.groupName))")
+            context.print("Modify: \(f.string(from: i.modificationDate))")
         }
         return status
     }
 
-    static func parseMode(_ spec: String, current: UInt32, isDir: Bool) -> UInt32? {
-        if let v = UInt32(spec, radix: 8), spec.allSatisfy({ ("0"..."7").contains($0) }) { return v }
+    static func parseMode(_ specification: String, current: UInt32, isDirectory: Bool) -> UInt32? {
+        if let v = UInt32(specification, radix: 8), specification.allSatisfy({ ("0"..."7").contains($0) }) { return v }
         var mode = current
-        for clause in spec.split(separator: ",") {
+        for clause in specification.split(separator: ",") {
             var who = ""
             var rest = Substring(clause)
             while let c = rest.first, "ugoa".contains(c) { who.append(c); rest.removeFirst() }
             if who.isEmpty || who.contains("a") { who = "ugo" }
-            while let op = rest.first, "+-=".contains(op) {
+            while let operation = rest.first, "+-=".contains(operation) {
                 rest.removeFirst()
-                var perms = ""
-                while let c = rest.first, "rwxXst".contains(c) { perms.append(c); rest.removeFirst() }
+                var permissions = ""
+                while let c = rest.first, "rwxXst".contains(c) { permissions.append(c); rest.removeFirst() }
                 var bits: UInt32 = 0
                 for w in who {
                     let shift: UInt32 = w == "u" ? 6 : (w == "g" ? 3 : 0)
-                    for p in perms {
+                    for p in permissions {
                         switch p {
                         case "r": bits |= 4 << shift
                         case "w": bits |= 2 << shift
                         case "x": bits |= 1 << shift
-                        case "X": if isDir || (current & 0o111) != 0 { bits |= 1 << shift }
+                        case "X": if isDirectory || (current & 0o111) != 0 { bits |= 1 << shift }
                         case "s": if w == "u" { bits |= 0o4000 } else if w == "g" { bits |= 0o2000 }
                         case "t": bits |= 0o1000
                         default: break
                         }
                     }
                 }
-                switch op {
+                switch operation {
                 case "+": mode |= bits
                 case "-": mode &= ~bits
                 default:
@@ -686,64 +666,62 @@ enum FileCommands {
         return mode
     }
 
-    static func chmod(_ ctx: CommandContext) -> Int32 {
-        var args = ctx.args
-        let recursive = args.first == "-R"
-        if recursive { args.removeFirst() }
-        guard args.count >= 2 else { ctx.error("missing operand"); return 1 }
-        let spec = args.removeFirst()
+    static func chmod(_ context: CommandContext) -> Int32 {
+        var arguments = context.arguments
+        let recursive = arguments.first == "-R"
+        if recursive { arguments.removeFirst() }
+        guard arguments.count >= 2 else { context.error("missing operand"); return 1 }
+        let specification = arguments.removeFirst()
         var status: Int32 = 0
         func apply(_ path: String, _ label: String) {
-            guard let info = FileInfo(path: path, follow: true) else { ctx.error("cannot access '\(label)': No such file or directory"); status = 1; return }
-            guard let mode = parseMode(spec, current: info.permissions, isDir: info.isDirectory) else {
-                ctx.error("invalid mode: '\(spec)'"); status = 1; return
+            guard let info = FileInfo(path: path, follow: true) else { context.error("cannot access '\(label)': No such file or directory"); status = 1; return }
+            guard let mode = parseMode(specification, current: info.permissions, isDirectory: info.isDirectory) else {
+                context.error("invalid mode: '\(specification)'"); status = 1; return
             }
-            do { try fm.setAttributes([.posixPermissions: Int(mode)], ofItemAtPath: path) }
-            catch { ctx.error("changing permissions of '\(label)': \(errorDescription(error))"); status = 1 }
-            if recursive && info.isDirectory, let children = try? fm.contentsOfDirectory(atPath: path) {
+            do { try fileManager.setAttributes([.posixPermissions: Int(mode)], ofItemAtPath: path) }
+            catch { context.error("changing permissions of '\(label)': \(errorDescription(error))"); status = 1 }
+            if recursive && info.isDirectory, let children = try? fileManager.contentsOfDirectory(atPath: path) {
                 for c in children { apply(path + "/" + c, label + "/" + c) }
             }
         }
-        for a in args { apply(ctx.resolve(a), a) }
+        for a in arguments { apply(context.resolve(a), a) }
         return status
     }
 
-    // MARK: tree
-
-    static func tree(_ ctx: CommandContext) -> Int32 {
-        let opts = ParsedOptions(ctx.args, flags: "adf", withValues: "L")
-        if let e = opts.error { ctx.error(e); return 1 }
-        let maxDepth = opts.value("L").flatMap { Int($0) } ?? Int.max
-        let color = ctx.stdout.isTerminal
-        var dirs = 0, files = 0
+    static func tree(_ context: CommandContext) -> Int32 {
+        let options = ParsedOptions(context.arguments, flags: "adf", withValues: "L")
+        if let e = options.error { context.error(e); return 1 }
+        let maxDepth = options.value("L").flatMap { Int($0) } ?? Int.max
+        let color = context.stdout.isTerminal
+        var directories = 0, files = 0
         func walk(_ path: String, _ prefix: String, _ depth: Int) {
-            guard depth < maxDepth, !ctx.shouldStop, var names = try? fm.contentsOfDirectory(atPath: path) else { return }
-            if !opts.has("a") { names = names.filter { !$0.hasPrefix(".") } }
+            guard depth < maxDepth, !context.shouldStop, var names = try? fileManager.contentsOfDirectory(atPath: path) else { return }
+            if !options.has("a") { names = names.filter { !$0.hasPrefix(".") } }
             names.sort { $0.lowercased() < $1.lowercased() }
             var entries = names.map { ($0, path + "/" + $0, FileInfo(path: path + "/" + $0)) }
-            if opts.has("d") { entries = entries.filter { $0.2?.isDirectory == true } }
-            for (idx, (name, p, info)) in entries.enumerated() {
-                let last = idx == entries.count - 1
+            if options.has("d") { entries = entries.filter { $0.2?.isDirectory == true } }
+            for (index, (name, p, info)) in entries.enumerated() {
+                let last = index == entries.count - 1
                 var shown = color ? colorize(name, info, path: p) : name
-                if info?.isSymlink == true, let t = try? fm.destinationOfSymbolicLink(atPath: p) { shown += " -> " + t }
-                ctx.print(prefix + (last ? "└── " : "├── ") + shown)
+                if info?.isSymlink == true, let t = try? fileManager.destinationOfSymbolicLink(atPath: p) { shown += " -> " + t }
+                context.print(prefix + (last ? "└── " : "├── ") + shown)
                 if info?.isDirectory == true {
-                    dirs += 1
+                    directories += 1
                     walk(p, prefix + (last ? "    " : "│   "), depth + 1)
                 } else {
                     files += 1
                 }
             }
         }
-        let roots = opts.operands.isEmpty ? ["."] : opts.operands
+        let roots = options.operands.isEmpty ? ["."] : options.operands
         for r in roots {
-            let p = ctx.resolve(r)
-            guard FileInfo(path: p, follow: true)?.isDirectory == true else { ctx.print("\(r) [error opening dir]"); continue }
-            ctx.print(color ? ANSI.boldBlue + r + ANSI.reset : r)
+            let p = context.resolve(r)
+            guard FileInfo(path: p, follow: true)?.isDirectory == true else { context.print("\(r) [error opening dir]"); continue }
+            context.print(color ? ANSI.boldBlue + r + ANSI.reset : r)
             walk(p, "", 0)
         }
-        ctx.print()
-        ctx.print("\(dirs) director\(dirs == 1 ? "y" : "ies")" + (opts.has("d") ? "" : ", \(files) file\(files == 1 ? "" : "s")"))
+        context.print()
+        context.print("\(directories) director\(directories == 1 ? "y" : "ies")" + (options.has("d") ? "" : ", \(files) file\(files == 1 ? "" : "s")"))
         return 0
     }
 }

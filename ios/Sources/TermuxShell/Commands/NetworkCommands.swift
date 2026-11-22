@@ -3,7 +3,6 @@ import Foundation
 import FoundationNetworking
 #endif
 
-/// Minimal `curl` / `wget` implemented with URLSession.
 enum NetworkCommands {
     static func register(_ r: CommandRegistry) {
         r.register("curl", "transfer a URL (-o FILE, -O, -s, -I, -L, -X METHOD, -d DATA, -H HEADER)") { curl($0) }
@@ -18,8 +17,7 @@ enum NetworkCommands {
 
     enum FetchError: Error { case cancelled, failed(String) }
 
-    /// Performs a request synchronously while honouring Ctrl-C.
-    static func fetch(_ request: URLRequest, ctx: CommandContext, followRedirects: Bool = true) -> Result<Response, FetchError> {
+    static func fetch(_ request: URLRequest, context: CommandContext, followRedirects: Bool = true) -> Result<Response, FetchError> {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 60
         let delegate = RedirectDelegate(follow: followRedirects)
@@ -40,7 +38,7 @@ enum NetworkCommands {
         }
         task.resume()
         while done.wait(timeout: .now() + 0.1) == .timedOut {
-            if ctx.isCancelled {
+            if context.isCancelled {
                 task.cancel()
                 _ = done.wait(timeout: .now() + 2)
                 return .failure(.cancelled)
@@ -64,17 +62,17 @@ enum NetworkCommands {
         return url
     }
 
-    static func curl(_ ctx: CommandContext) -> Int32 {
-        var args = ctx.args
+    static func curl(_ context: CommandContext) -> Int32 {
+        var arguments = context.arguments
         var output: String? = nil
         var remoteName = false, silent = false, headOnly = false, includeHeaders = false, follow = false, failFlag = false
         var method: String? = nil
         var body: String? = nil
         var headers: [(String, String)] = []
         var urls: [String] = []
-        while !args.isEmpty {
-            let a = args.removeFirst()
-            func value() -> String? { args.isEmpty ? nil : args.removeFirst() }
+        while !arguments.isEmpty {
+            let a = arguments.removeFirst()
+            func value() -> String? { arguments.isEmpty ? nil : arguments.removeFirst() }
             switch a {
             case "-o", "--output": output = value()
             case "-O", "--remote-name": remoteName = true
@@ -93,12 +91,12 @@ enum NetworkCommands {
             case "-A", "--user-agent": if let v = value() { headers.append(("User-Agent", v)) }
             case "-v", "--verbose", "-k", "--insecure", "-#", "--progress-bar", "--compressed": break
             default:
-                if a.hasPrefix("-") && a.count > 1 { ctx.error("option \(a): is unknown"); return 2 }
+                if a.hasPrefix("-") && a.count > 1 { context.error("option \(a): is unknown"); return 2 }
                 urls.append(a)
             }
         }
-        guard let urlText = urls.first else { ctx.error("no URL specified!"); ctx.stderr.writeLine("curl: try 'curl --help' for more information"); return 2 }
-        guard let url = normalizeURL(urlText) else { ctx.error("(3) URL rejected: Malformed input to a URL function"); return 3 }
+        guard let urlText = urls.first else { context.error("no URL specified!"); context.stderr.writeLine("curl: try 'curl --help' for more information"); return 2 }
+        guard let url = normalizeURL(urlText) else { context.error("(3) URL rejected: Malformed input to a URL function"); return 3 }
         var request = URLRequest(url: url)
         request.httpMethod = method ?? (headOnly ? "HEAD" : (body != nil ? "POST" : "GET"))
         if let b = body {
@@ -107,15 +105,15 @@ enum NetworkCommands {
         }
         request.setValue("curl/8.0 (Termux iOS)", forHTTPHeaderField: "User-Agent")
         for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }
-        switch fetch(request, ctx: ctx, followRedirects: follow) {
+        switch fetch(request, context: context, followRedirects: follow) {
         case .failure(.cancelled):
             return 130
-        case .failure(.failed(let msg)):
-            if !silent || ctx.args.contains("-S") || ctx.args.contains("-sS") { ctx.error("(6) \(msg)") }
+        case .failure(.failed(let message)):
+            if !silent || context.arguments.contains("-S") || context.arguments.contains("-sS") { context.error("(6) \(message)") }
             return 6
         case .success(let resp):
             if failFlag && resp.status >= 400 {
-                if !silent { ctx.error("(22) The requested URL returned error: \(resp.status)") }
+                if !silent { context.error("(22) The requested URL returned error: \(resp.status)") }
                 return 22
             }
             var out: [UInt8] = []
@@ -131,47 +129,47 @@ enum NetworkCommands {
                 output = name.isEmpty || name == "/" ? "index.html" : name
             }
             if let o = output, o != "-" {
-                do { try Data(out).write(to: URL(fileURLWithPath: ctx.resolve(o))) }
-                catch { ctx.error("(23) Failure writing output to destination"); return 23 }
-                if !silent { ctx.stderr.writeLine("  % Total: \(out.count) bytes written to \(o)") }
+                do { try Data(out).write(to: URL(fileURLWithPath: context.resolve(o))) }
+                catch { context.error("(23) Failure writing output to destination"); return 23 }
+                if !silent { context.stderr.writeLine("  % Total: \(out.count) bytes written to \(o)") }
             } else {
-                ctx.stdout.write(out)
+                context.stdout.write(out)
             }
             return 0
         }
     }
 
-    static func wget(_ ctx: CommandContext) -> Int32 {
-        var args = ctx.args
+    static func wget(_ context: CommandContext) -> Int32 {
+        var arguments = context.arguments
         var output: String? = nil
         var quiet = false
         var urls: [String] = []
-        while !args.isEmpty {
-            let a = args.removeFirst()
+        while !arguments.isEmpty {
+            let a = arguments.removeFirst()
             switch a {
-            case "-O", "--output-document": output = args.isEmpty ? nil : args.removeFirst()
+            case "-O", "--output-document": output = arguments.isEmpty ? nil : arguments.removeFirst()
             case "-q", "--quiet": quiet = true
-            case "-qO", "-qO-": quiet = true; output = a == "-qO-" ? "-" : (args.isEmpty ? nil : args.removeFirst())
+            case "-qO", "-qO-": quiet = true; output = a == "-qO-" ? "-" : (arguments.isEmpty ? nil : arguments.removeFirst())
             case "-O-": output = "-"
             case "-c", "--continue", "-nv", "--no-verbose", "--no-check-certificate": break
             default:
-                if a.hasPrefix("-") && a.count > 1 { ctx.error("unrecognized option '\(a)'"); return 2 }
+                if a.hasPrefix("-") && a.count > 1 { context.error("unrecognized option '\(a)'"); return 2 }
                 urls.append(a)
             }
         }
-        guard let urlText = urls.first else { ctx.error("missing URL"); return 1 }
-        guard let url = normalizeURL(urlText) else { ctx.error("\(urlText): Invalid URL"); return 1 }
-        if !quiet { ctx.stderr.writeLine("Connecting to \(url.host ?? urlText)...") }
-        switch fetch(URLRequest(url: url), ctx: ctx) {
+        guard let urlText = urls.first else { context.error("missing URL"); return 1 }
+        guard let url = normalizeURL(urlText) else { context.error("\(urlText): Invalid URL"); return 1 }
+        if !quiet { context.stderr.writeLine("Connecting to \(url.host ?? urlText)...") }
+        switch fetch(URLRequest(url: url), context: context) {
         case .failure(.cancelled): return 130
-        case .failure(.failed(let msg)): ctx.error(msg); return 4
+        case .failure(.failed(let message)): context.error(message); return 4
         case .success(let resp):
-            if resp.status >= 400 { ctx.error("server returned error: HTTP \(resp.status)"); return 8 }
+            if resp.status >= 400 { context.error("server returned error: HTTP \(resp.status)"); return 8 }
             let name = output ?? { let n = url.lastPathComponent; return n.isEmpty || n == "/" ? "index.html" : n }()
-            if name == "-" { ctx.stdout.write([UInt8](resp.data)); return 0 }
-            do { try resp.data.write(to: URL(fileURLWithPath: ctx.resolve(name))) }
-            catch { ctx.error("\(name): Permission denied"); return 3 }
-            if !quiet { ctx.stderr.writeLine("Saving to: '\(name)'\n'\(name)' saved [\(resp.data.count)]") }
+            if name == "-" { context.stdout.write([UInt8](resp.data)); return 0 }
+            do { try resp.data.write(to: URL(fileURLWithPath: context.resolve(name))) }
+            catch { context.error("\(name): Permission denied"); return 3 }
+            if !quiet { context.stderr.writeLine("Saving to: '\(name)'\n'\(name)' saved [\(resp.data.count)]") }
             return 0
         }
     }

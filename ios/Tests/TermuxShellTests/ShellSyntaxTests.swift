@@ -35,7 +35,7 @@ final class ShellSyntaxTests: XCTestCase {
         let w = try words(#"echo $HOME ${USER} "x${A:-def}y" $? $1"#)
         XCTAssertEqual(w[1].parts, [.parameter(ParameterExpansion(name: "HOME"), quoted: false)])
         XCTAssertEqual(w[2].parts, [.parameter(ParameterExpansion(name: "USER"), quoted: false)])
-        XCTAssertEqual(w[3].parts, [.quoted("x"), .parameter(ParameterExpansion(name: "A", op: ":-", argument: "def"), quoted: true), .quoted("y")])
+        XCTAssertEqual(w[3].parts, [.quoted("x"), .parameter(ParameterExpansion(name: "A", operation: ":-", argument: "def"), quoted: true), .quoted("y")])
         XCTAssertEqual(w[4].parts, [.parameter(ParameterExpansion(name: "?"), quoted: false)])
         XCTAssertEqual(w[5].parts, [.parameter(ParameterExpansion(name: "1"), quoted: false)])
     }
@@ -61,15 +61,15 @@ final class ShellSyntaxTests: XCTestCase {
         let list = try ShellParser.parse("cmd > out.txt 2>&1 < in.txt >> log")
         let c = try XCTUnwrap(simple(list))
         XCTAssertEqual(c.words.map { $0.plainLiteral }, ["cmd"])
-        XCTAssertEqual(c.redirections.map { $0.op }, [.output, .duplicateOutput, .input, .append])
-        XCTAssertEqual(c.redirections.map { $0.fd }, [1, 2, 0, 1])
+        XCTAssertEqual(c.redirections.map { $0.operation }, [.output, .duplicateOutput, .input, .append])
+        XCTAssertEqual(c.redirections.map { $0.fileDescriptor }, [1, 2, 0, 1])
         XCTAssertEqual(c.redirections.map { $0.target.plainLiteral }, ["out.txt", "1", "in.txt", "log"])
     }
 
     func testDigitsNotFollowedByRedirectAreWords() throws {
         let c = try XCTUnwrap(simple(try ShellParser.parse("echo 2 3>x")))
         XCTAssertEqual(c.words.map { $0.plainLiteral }, ["echo", "2"])
-        XCTAssertEqual(c.redirections.first?.fd, 3)
+        XCTAssertEqual(c.redirections.first?.fileDescriptor, 3)
     }
 
     func testPipelineAndAndOr() throws {
@@ -98,8 +98,8 @@ final class ShellSyntaxTests: XCTestCase {
     }
 
     func testIncompleteInput() {
-        for src in ["echo 'abc", "echo \"abc", "ls |", "true &&", "echo \\", "echo $(ls", "(echo"] {
-            XCTAssertThrowsError(try ShellParser.parse(src), src) { XCTAssertEqual($0 as? ShellSyntaxError, .incomplete, src) }
+        for source in ["echo 'abc", "echo \"abc", "ls |", "true &&", "echo \\", "echo $(ls", "(echo"] {
+            XCTAssertThrowsError(try ShellParser.parse(source), source) { XCTAssertEqual($0 as? ShellSyntaxError, .incomplete, source) }
         }
     }
 
