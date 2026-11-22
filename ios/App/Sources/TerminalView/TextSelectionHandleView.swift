@@ -36,7 +36,7 @@ final class TextSelectionHandleView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    var anchorPoint: CGPoint {
+    var selectionAnchorPoint: CGPoint {
         return CGPoint(x: frame.midX, y: frame.minY)
     }
 
@@ -63,7 +63,7 @@ final class TextSelectionHandleView: UIView {
         switch recognizer.state {
         case .began:
             isDragging = true
-            dragStartAnchor = anchorPoint
+            dragStartAnchor = selectionAnchorPoint
             onDrag?(self, dragStartAnchor, .began)
         case .changed:
             let translation = recognizer.translation(in: superview)
