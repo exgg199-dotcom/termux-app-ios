@@ -1,10 +1,7 @@
-# XcodeGen project for the Termux iOS app.
-#   brew install xcodegen
-#   cd ios/App && xcodegen generate   # -> TermuxIOS.xcodeproj
 name: TermuxIOS
 
 options:
-  bundleIdPrefix: com.termux
+  bundleIdPrefix: com.nxteam
   deploymentTarget:
     iOS: "15.0"
   createIntermediateGroups: true
@@ -19,7 +16,6 @@ settings:
     DEAD_CODE_STRIPPING: YES
 
 packages:
-  # The Swift package in ios/ (Package.swift) with the TermuxTerminal and TermuxShell libraries.
   TermuxIOS:
     path: ..
 
@@ -43,19 +39,10 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
-        # Expose Documents (with the "home" directory) in the Files app and iTunes file sharing.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UILaunchScreen:
           UIColorName: LaunchBackground
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
-          UISceneConfigurations:
-            UIWindowSceneSessionRoleApplication:
-              - UISceneConfigurationName: Default Configuration
-                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
-        UIStatusBarStyle: UIStatusBarStyleLightContent
-        UIViewControllerBasedStatusBarAppearance: true
         UIRequiresFullScreen: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -71,18 +58,11 @@ targets:
       base:
         PRODUCT_NAME: Termux
         PRODUCT_MODULE_NAME: Termux
-        PRODUCT_BUNDLE_IDENTIFIER: com.termux.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.nxteam.termux.test
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_STYLE: Automatic
-        # Set your team to run on a device (Xcode > Signing & Capabilities), or pass
-        # DEVELOPMENT_TEAM=XXXXXXXXXX to xcodebuild.
-        DEVELOPMENT_TEAM: ""
         SUPPORTS_MACCATALYST: NO
-        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: YES
 
-  # Pure logic tests (no host app): extra keys parsing, properties parsing, key mapping, cell
-  # metrics and selection math. These source files are UIKit-free and compiled into the bundle.
   TermuxAppTests:
     type: bundle.unit-test
     platform: iOS
@@ -104,10 +84,8 @@ targets:
         product: TermuxTerminal
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.termux.ios.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.nxteam.termux.test.tests
         GENERATE_INFOPLIST_FILE: YES
-        CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ""
 
 schemes:
   Termux:
