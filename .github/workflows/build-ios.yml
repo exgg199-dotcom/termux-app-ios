@@ -86,7 +86,7 @@ jobs:
 
   test-linux:
     runs-on: ubuntu-latest
-    container: swift:6.0.3-jammy
+    container: swift:6.0.3-noble
     steps:
       - name: Checkout
         uses: actions/checkout@v4
