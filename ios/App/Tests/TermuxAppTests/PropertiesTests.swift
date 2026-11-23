@@ -198,7 +198,7 @@ final class BootstrapTests: XCTestCase {
     }
 
     func testBootstrapCreatesHomeAndProperties() throws {
-        let paths = TermuxPaths(documentsDirectory: documents)
+        let paths = TermuxPaths(documentsDirectory: documents, libraryDirectory: documents.appendingPathComponent("Library", isDirectory: true))
         try Bootstrap.run(paths: paths)
         var isDirectory: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(atPath: paths.homeDirectory.path, isDirectory: &isDirectory))
@@ -209,7 +209,7 @@ final class BootstrapTests: XCTestCase {
     }
 
     func testBootstrapDoesNotOverwrite() throws {
-        let paths = TermuxPaths(documentsDirectory: documents)
+        let paths = TermuxPaths(documentsDirectory: documents, libraryDirectory: documents.appendingPathComponent("Library", isDirectory: true))
         try FileManager.default.createDirectory(at: paths.termuxConfigDirectory, withIntermediateDirectories: true)
         try Data("fullscreen=true\n".utf8).write(to: paths.primaryPropertiesFile)
         try Bootstrap.run(paths: paths)
@@ -217,7 +217,7 @@ final class BootstrapTests: XCTestCase {
     }
 
     func testSecondaryPropertiesFile() throws {
-        let paths = TermuxPaths(documentsDirectory: documents)
+        let paths = TermuxPaths(documentsDirectory: documents, libraryDirectory: documents.appendingPathComponent("Library", isDirectory: true))
         try FileManager.default.createDirectory(at: paths.termuxConfigDirectory2, withIntermediateDirectories: true)
         try Data("fullscreen=true\n".utf8).write(to: paths.secondaryPropertiesFile)
         try Bootstrap.run(paths: paths)
@@ -226,13 +226,35 @@ final class BootstrapTests: XCTestCase {
     }
 
     func testMotd() throws {
-        let paths = TermuxPaths(documentsDirectory: documents)
+        let paths = TermuxPaths(documentsDirectory: documents, libraryDirectory: documents.appendingPathComponent("Library", isDirectory: true))
         try Bootstrap.run(paths: paths)
         XCTAssertEqual(Bootstrap.motd(paths: paths), Bootstrap.defaultMotd)
         try Data("custom".utf8).write(to: paths.motdFile)
         XCTAssertEqual(Bootstrap.motd(paths: paths), "custom")
         try Data().write(to: paths.hushLoginFile)
         XCTAssertNil(Bootstrap.motd(paths: paths))
+    }
+
+    func testBootstrapCreatesPrefix() throws {
+        let library = documents.appendingPathComponent("Library", isDirectory: true)
+        let paths = TermuxPaths(documentsDirectory: documents, libraryDirectory: library)
+        XCTAssertEqual(paths.prefixDirectory, library.appendingPathComponent("usr", isDirectory: true))
+        try Bootstrap.run(paths: paths)
+        for subdirectory in Bootstrap.prefixSubdirectories {
+            var isDirectory: ObjCBool = false
+            let path = paths.prefixDirectory.appendingPathComponent(subdirectory).path
+            XCTAssertTrue(FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), subdirectory)
+            XCTAssertTrue(isDirectory.boolValue, subdirectory)
+        }
+        XCTAssertEqual(try String(contentsOf: paths.packageSourcesFile, encoding: .utf8), Bootstrap.defaultPackageSource + "\n")
+        try Data("file:///custom/index.json\n".utf8).write(to: paths.packageSourcesFile)
+        try Bootstrap.run(paths: paths)
+        XCTAssertEqual(try String(contentsOf: paths.packageSourcesFile, encoding: .utf8), "file:///custom/index.json\n")
+    }
+
+    func testDefaultPrefixIsNextToDocuments() {
+        let paths = TermuxPaths(documentsDirectory: URL(fileURLWithPath: "/container/Documents", isDirectory: true))
+        XCTAssertEqual(paths.prefixDirectory.path, "/container/Library/usr")
     }
 
     func testTerminalText() {

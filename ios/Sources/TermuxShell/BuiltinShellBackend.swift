@@ -32,12 +32,13 @@ public final class BuiltinShellBackend: TerminalBackend {
     private var continuation = ""
     private var currentToken = CancellationToken()
 
-    public init(homeDirectory: URL, environment: [String: String] = [:]) {
+    public init(homeDirectory: URL, environment: [String: String] = [:], programRunner: ProgramRunner? = nil) {
         self.homeDirectory = homeDirectory
         let home = homeDirectory.standardizedFileURL.path
         try? FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
         let history = ShellHistory(file: home + "/.termux_history")
         interpreter = ShellInterpreter(homeDirectory: home, environment: environment, history: history)
+        interpreter.programRunner = programRunner
         writer = TerminalWriter { [weak self] bytes in self?.onOutput?(bytes) }
         terminalInput = TerminalInputStream(echo: { [weak self] bytes in self?.writer.write(bytes, immediate: true) })
         let out = TerminalOutputStream(writer: writer)
@@ -115,9 +116,16 @@ public final class BuiltinShellBackend: TerminalBackend {
 
     iOS does not allow apps to run native programs, so this is a
     built-in shell with common commands implemented inside the app.
+    Packages are WebAssembly programs; Android Termux packages
+    cannot run on iOS.
 
     Working with files:  ls, cd, cat, cp, mv, rm, mkdir, find, grep
     Run 'help' to list all commands.
+
+    Working with packages:
+     - Search packages:   pkg search <query>
+     - Install a package: pkg install <package>
+     - Upgrade packages:  pkg upgrade
 
     """
 

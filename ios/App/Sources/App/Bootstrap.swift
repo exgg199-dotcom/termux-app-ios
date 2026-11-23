@@ -1,9 +1,14 @@
 import Foundation
 
 public enum Bootstrap {
+    public static let defaultPackageSource = "https://raw.githubusercontent.com/exgg199-dotcom/termux-app-ios/master/packages/index.json"
+
+    public static let prefixSubdirectories = ["bin", "etc/pkg", "libexec/wasm", "var/lib/pkg/lists", "var/cache/pkg/archives", "tmp"]
+
     public static func run(paths: TermuxPaths, fileManager: FileManager = .default) throws {
         try fileManager.createDirectory(at: paths.homeDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: paths.termuxConfigDirectory, withIntermediateDirectories: true)
+        try createPrefix(paths: paths, fileManager: fileManager)
 
         let propertiesExist = fileManager.fileExists(atPath: paths.primaryPropertiesFile.path)
             || fileManager.fileExists(atPath: paths.secondaryPropertiesFile.path)
@@ -15,6 +20,20 @@ public enum Bootstrap {
         if !fileManager.fileExists(atPath: readme.path) {
             try? Data(documentsReadme.utf8).write(to: readme, options: .atomic)
         }
+    }
+
+    public static func createPrefix(paths: TermuxPaths, fileManager: FileManager = .default) throws {
+        for subdirectory in prefixSubdirectories {
+            let directory = paths.prefixDirectory.appendingPathComponent(subdirectory, isDirectory: true)
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        if !fileManager.fileExists(atPath: paths.packageSourcesFile.path) {
+            try Data((defaultPackageSource + "\n").utf8).write(to: paths.packageSourcesFile, options: .atomic)
+        }
+        var prefix = paths.prefixDirectory
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? prefix.setResourceValues(values)
     }
 
     public static func motd(paths: TermuxPaths, fileManager: FileManager = .default) -> String? {
@@ -36,10 +55,17 @@ public enum Bootstrap {
     Welcome to Termux for iOS!
 
     This is a port of the Termux terminal to iOS. Since iOS does not
-    allow apps to run other programs, there is no package manager
-    (no pkg/apt): commands are provided by a built-in shell.
+    allow apps to run other programs, commands are provided by a
+    built-in shell. Type \u{1B}[1mhelp\u{1B}[0m to list them.
 
-    Type \u{1B}[1mhelp\u{1B}[0m to list the available commands.
+    Working with packages:
+
+     * Search packages:   \u{1B}[1mpkg search <query>\u{1B}[0m
+     * Install a package: \u{1B}[1mpkg install <package>\u{1B}[0m
+     * Upgrade packages:  \u{1B}[1mpkg upgrade\u{1B}[0m
+
+    Packages are WebAssembly programs; Android Termux packages cannot
+    run on iOS.
 
     Your home directory is visible in the Files app under
     On My iPhone/iPad > Termux > home.

@@ -13,7 +13,8 @@ built-in shell (`TermuxShell`) live in the Swift package in `ios/`, see `ios/doc
 | `Sources/App/ContentView.swift`, `SessionsDrawerView.swift` | Root view, sessions drawer, toasts | `TermuxActivity` layout, `TermuxSessionsListViewController` |
 | `Sources/App/TerminalController.swift` | Clients of the terminal view, extra keys and sessions | `TermuxActivity`, `TermuxTerminalViewClient`, `TermuxTerminalSessionActivityClient`, `TermuxTerminalExtraKeys` |
 | `Sources/App/SessionManager.swift` | Sessions, each with a `BuiltinShellBackend` (`$HOME` = `Documents/home`) | `TermuxService` |
-| `Sources/App/Bootstrap.swift` | First launch: home directory, default `termux.properties`, message of the day | `TermuxInstaller` |
+| `Sources/App/Bootstrap.swift` | First launch: home directory, `$PREFIX` (`Library/usr`, excluded from backup), `sources.list`, default `termux.properties`, message of the day | `TermuxInstaller` |
+| `../../packages/index.json` | Package list bundled as a resource, used by `pkg` when it cannot download the list (packages are WebAssembly programs run by `TermuxWasm`) | `bootstrap` packages |
 | `Sources/TerminalView/` | `TerminalView` (UIKit, `UIKeyInput`), CoreText `TerminalRenderer`, text selection | `terminal-view` |
 | `Sources/ExtraKeys/` | Extra keys parsing and `ExtraKeysView` keyboard accessory | `termux-shared/.../extrakeys` |
 | `Sources/Settings/` | `termux.properties` parsing, preferences, SwiftUI settings | `TermuxSharedProperties`, `SettingsActivity` |

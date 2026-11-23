@@ -165,16 +165,26 @@ public enum JavaPropertiesParser {
 public struct TermuxPaths {
     public let documentsDirectory: URL
     public let homeDirectory: URL
+    public let prefixDirectory: URL
 
-    public init(documentsDirectory: URL) {
+    public init(documentsDirectory: URL, libraryDirectory: URL? = nil) {
         self.documentsDirectory = documentsDirectory
         self.homeDirectory = documentsDirectory.appendingPathComponent("home", isDirectory: true)
+        let library = libraryDirectory
+            ?? documentsDirectory.deletingLastPathComponent().appendingPathComponent("Library", isDirectory: true)
+        self.prefixDirectory = library.appendingPathComponent("usr", isDirectory: true)
     }
 
     public static func appDefault() -> TermuxPaths {
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        let fileManager = FileManager.default
+        let documents = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents", isDirectory: true)
-        return TermuxPaths(documentsDirectory: documents)
+        let library = fileManager.urls(for: .libraryDirectory, in: .userDomainMask).first
+        return TermuxPaths(documentsDirectory: documents, libraryDirectory: library)
+    }
+
+    public var packageSourcesFile: URL {
+        return prefixDirectory.appendingPathComponent("etc/pkg/sources.list", isDirectory: false)
     }
 
     public var termuxConfigDirectory: URL { return homeDirectory.appendingPathComponent(".termux", isDirectory: true) }

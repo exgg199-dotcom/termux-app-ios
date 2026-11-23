@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 import TermuxTerminal
+import TermuxShell
+import TermuxWasm
 
 final class TermuxEnvironment: ObservableObject {
     static let shared = TermuxEnvironment()
@@ -11,6 +13,7 @@ final class TermuxEnvironment: ObservableObject {
 
     let paths: TermuxPaths
     let preferences: AppPreferences
+    let programRunner = WasmProgramRunner()
     @Published private(set) var properties = TermuxProperties()
     @Published private(set) var settingsRevision = 0
     private(set) var extraKeysInfo: ExtraKeysInfo?
@@ -32,6 +35,7 @@ final class TermuxEnvironment: ObservableObject {
     func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
+        PackageManager.bundledIndexURL = Bundle.main.url(forResource: "index", withExtension: "json")
         do {
             try Bootstrap.run(paths: paths)
         } catch {
@@ -104,8 +108,12 @@ final class TermuxEnvironment: ObservableObject {
     }
 
     func shellEnvironment() -> [String: String] {
+        let prefix = paths.prefixDirectory.path
         var environmentVariables: [String: String] = [
             "HOME": paths.homeDirectory.path,
+            "PREFIX": prefix,
+            "PATH": prefix + "/bin:" + paths.homeDirectory.path + "/bin",
+            "TMPDIR": prefix + "/tmp",
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
             "LANG": "en_US.UTF-8",

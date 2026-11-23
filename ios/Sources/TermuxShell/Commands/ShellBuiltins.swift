@@ -324,7 +324,8 @@ enum ShellBuiltins {
                 return 0
             }
             context.print("Termux for iOS built-in shell. iOS does not allow running native programs,")
-            context.print("so these commands are implemented inside the app:")
+            context.print("so these commands are implemented inside the app.")
+            context.print("'pkg install' adds WebAssembly programs (run 'pkg list-all' to see them).")
             context.print()
             let width = (commands.map { $0.name.count }.max() ?? 8) + 2
             for c in commands { context.print("  " + ShellFormat.pad(c.name, width) + c.summary) }
@@ -332,20 +333,6 @@ enum ShellBuiltins {
             context.print("Shell features: pipes |, && ||, ;, redirections > >> < 2>&1, $VAR, $(command), $((math)), globs * ?")
             return 0
         }
-
-        let packageMessage = { (context: CommandContext) -> Int32 in
-            context.stderr.writeLine("""
-            \(context.name): package management is not available on iOS.
-
-            iOS does not allow apps to download and run native binaries, so Termux
-            packages (apt/pkg) cannot be installed. The commands in this shell are
-            built into the app - run 'help' to see what is available.
-            """)
-            return 1
-        }
-        r.register("pkg", "explains why packages cannot be installed on iOS", packageMessage)
-        r.register("apt", "explains why packages cannot be installed on iOS", packageMessage)
-        r.register("apt-get", "", packageMessage)
     }
 
     static func quote(_ s: String) -> String {

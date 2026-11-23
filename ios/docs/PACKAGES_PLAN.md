@@ -693,3 +693,31 @@ The implementer must run this once locally (network is available) and **remove f
 - /home/user/termux-app-ios/ios/Sources/TermuxShell/Commands/ShellBuiltins.swift (remove stub) and new /home/user/termux-app-ios/ios/Sources/TermuxShell/Packages/PackageManager.swift
 - /home/user/termux-app-ios/ios/Sources/TermuxWasm/WasmProgramRunner.swift (new)
 - /home/user/termux-app-ios/ios/App/Sources/App/TermuxEnvironment.swift, /home/user/termux-app-ios/ios/App/Sources/App/Bootstrap.swift, /home/user/termux-app-ios/ios/App/project.yml, /home/user/termux-app-ios/.github/workflows/build-ios.yml
+---
+
+## Implementation notes
+
+What was built differs from the plan above in these points:
+
+- **Phase 0.** WasmKit 0.2.2 resolved and built on Linux with Swift 6.0.3 at the first try, so no fallback was needed. Resolved versions: WasmKit 0.2.2, swift-system 1.6.6, swift-argument-parser 1.8.2. `ios/Package.resolved` is added. WasmKit also ships SwiftPM plugins (`WITExtractorPlugin`), so the `-skipPackagePluginValidation` flag in CI is needed.
+- **`store.resourceLimiter`** is `@_spi(Fuzzing)` in 0.2.2, so `WasmProgramRunner.swift` uses `@_spi(Fuzzing) import WasmKit`. The default `ResourceLimiter` methods are internal, so `WasmMemoryLimiter` implements both methods.
+- **`WASIHostFunction.implementation`** takes a `GuestMemory`, not a `Memory`. `Memory` conforms to it, so the wrappers pass the instance memory.
+- **WASI descriptors leak in 0.2.2.** `WASIBridgeToHost` has no `deinit` and never closes its preopens or the files a program leaves open. After each run the runner calls the bridge's own `fd_close` for fds 3 up to (number of preopens + number of successful `path_open` calls + 2). Guest `fd_close`/`fd_renumber` on fds 0-2 are intercepted, so the bridge never closes the runner's stdio descriptors.
+- **a-Shell binaries pass `AT_FDCWD` (-2)** as the directory fd of `path_open` and the other `path_*` calls. Without a fix, xz, zip and unzip failed with "Not a directory". Before linking, the runner looks up the fd of the `.` preopen through the bridge's `fd_prestat_get`/`fd_prestat_dir_name`, using a scratch `GuestMemory`. It then rewrites a directory argument of -2 to that fd. A unit test covers this.
+- **Preopen order** is a dictionary, so it is not deterministic. The file-access test sets `TMPDIR` to a missing directory, so fds 3 and 4 are `.` and `$HOME`, which are the same host directory in that test.
+- **`WasmCompatibilityImports.defineMissing`** also takes the `WasmMemoryLimiter`, so that `ashell_getcwd` can bounds-check its write. Imports with a `v128` result are not stubbed, because `Value` cannot represent v128; their instantiation fails with WasmKit's error.
+- **Module cache.** The key is the path with symlinks resolved, so `python` and `python3` share one parsed module. Parsing happens outside the lock.
+- **`InstalledPackage`** has an extra optional `depends`, so `remove` can refuse to remove a dependency even when the index has changed. Otherwise it falls back to the index.
+- **Install transaction.** `PackageTransaction` moves every replaced or removed file to a backup in `archives/` first. On failure it restores the backups and deletes what the run created, including new directories. On success it deletes the backups and prunes directories that became empty (for example `share/hello` after an upgrade drops its last file).
+- **Index validation** happens at install time. Paths must be relative, without `.`/`..` components. Commands must point to a file of the package, and modes must be octal. An invalid record gives `E: <name>: invalid file path '<path>' in the package index` and exit 100.
+- **Provided names.** `pkg install`/`show` also accept names from `provides` (for example `pkg install python3`).
+- **Unmet dependencies** use apt's wording: `<pkg> : Depends: <dep> but it is not installable`, followed by `E: Unable to correct problems, you have held broken packages.`. A cycle prints `E: Dependency cycle: a -> b -> a`.
+- **Listing and search without lists.** When no list is cached and there is no bundled index, `list-all` and `search` print `W: No package lists are available. Run 'pkg update' first.`.
+- **Bootstrap** cannot import TermuxShell, because it is compiled into `TermuxAppTests`, which only depends on TermuxTerminal. So `Bootstrap.defaultPackageSource` and `Bootstrap.prefixSubdirectories` duplicate the `PackageLayout` values. `PackageManagerTests.testApplicationBootstrapMatchesLayout` reads `Bootstrap.swift` and fails if they drift apart. `TermuxPaths.packageSourcesFile` was added.
+- **App tests** now pass an explicit `libraryDirectory`, because the temporary directories would otherwise share `<tmp>/Library/usr`. New: `testBootstrapCreatesPrefix` and `testDefaultPrefixIsNextToDocuments`. They were run on Linux through a scratch SwiftPM package that links the Foundation-only app files.
+- **Script environment.** `FOO=1 script.sh` now also passes `FOO` to sh scripts run from `PATH`, not only to WebAssembly programs.
+- **The native-binary message** (`native Linux/Android programs cannot run on iOS ...`) is used for ELF only. Mach-O and other binary files keep the old message.
+- **CI.** The resolve step also uses `-derivedDataPath build`, so the build step reuses the resolved packages. It passes the two skip flags as well.
+- **Package set.** quickjs is 0.18.0, which passed the network test. All 8 packages passed `RealPackageTests` in debug and release builds, and `verify_index.py` passed (see `packages/README.md`). No package was dropped. A php check (`php-cgi -q answer.php`) was added to the network test.
+- **Test counts on Linux.** 305 tests run: 247 earlier tests, 51 new tests and 7 network tests that are skipped unless `TERMUX_NETWORK_TESTS=1`.
+- **Review fixes.** Package file paths under `etc/pkg`, `var/lib/pkg`, `var/cache/pkg` and `tmp` are rejected, as are versions containing `/` and duplicate file paths. Installing a package whose files or commands belong to another installed package fails with apt's `trying to overwrite` error. The fetcher also reads the HTTP status from `task.response`, in case the response delegate method is not called. Pipelines keep their `PipeChannel`s alive with `withExtendedLifetime`, because the readers and writers hold them `unowned` and a release build freed them early (`printf ... | sqlite3` crashed).

@@ -69,7 +69,8 @@ final class SessionManager: ObservableObject, TerminalSessionClient {
     @discardableResult
     func addNewSession(name: String?) -> TerminalSession {
         let backend = BuiltinShellBackend(homeDirectory: environment.paths.homeDirectory,
-                                          environment: environment.shellEnvironment())
+                                          environment: environment.shellEnvironment(),
+                                          programRunner: environment.programRunner)
         backend.showsWelcome = false
         let session = TerminalSession(backend: backend,
                                       transcriptRows: environment.properties.terminalTranscriptRows,

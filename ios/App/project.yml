@@ -27,11 +27,15 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+      - path: ../../packages/index.json
+        buildPhase: resources
     dependencies:
       - package: TermuxIOS
         product: TermuxTerminal
       - package: TermuxIOS
         product: TermuxShell
+      - package: TermuxIOS
+        product: TermuxWasm
     info:
       path: Info.plist
       properties:

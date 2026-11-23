@@ -6,6 +6,7 @@ This directory contains the iOS port of the Termux app. The Android modules map 
 |-----------------------|------------------------------------------|--------|
 | `terminal-emulator`   | `Sources/TermuxTerminal` (SwiftPM, pure Foundation, builds on Linux) | core   |
 | (JNI `termux.c` PTY)  | `Sources/TermuxShell` (`TerminalBackend` impls) | shell  |
+| `pkg`/`apt`, packages | `Sources/TermuxShell/Packages`, `Sources/TermuxWasm` (WasmKit 0.2.2 WASI runtime) | packages |
 | `terminal-view`       | `App/Sources/TerminalView` (UIKit)        | app    |
 | `app`, `termux-shared`| `App/Sources/...` (UIKit app, XcodeGen `App/project.yml`) | app |
 
@@ -171,7 +172,10 @@ public enum WcWidth { public static func width(_ codePoint: Int) -> Int }
 
 ```swift
 public final class BuiltinShellBackend: TerminalBackend {
-    public init(homeDirectory: URL, environment: [String: String] = [:])
+    public init(homeDirectory: URL, environment: [String: String] = [:], programRunner: ProgramRunner? = nil)
+}
+public protocol ProgramRunner: AnyObject {
+    func run(programAt path: String, context: CommandContext) -> Int32
 }
 #if !os(iOS)
 public final class PTYProcessBackend: TerminalBackend {
@@ -179,6 +183,50 @@ public final class PTYProcessBackend: TerminalBackend {
 }
 #endif
 ```
+
+### TermuxWasm
+
+```swift
+public final class WasmProgramRunner: ProgramRunner {
+    public init(threadStackSize: Int = 16 << 20, interpreterStackSize: Int = 8 << 20, memoryLimit: Int = 1 << 30, cacheCapacity: Int = 3)
+}
+```
+
+## Packages
+
+`pkg`, `apt`, `apt-get`, `apt-cache` and `dpkg -l`/`-L` are builtins (`Commands/PackageCommands.swift`) on top of
+`PackageManager`. They install WASI preview 1 WebAssembly programs listed in `packages/index.json` (see
+`packages/README.md`); real Termux packages are Android/Linux aarch64 binaries and cannot run on iOS.
+
+* When the shell runs a file from `PATH` (or a path) that starts with `\0asm`, it hands it to the
+  interpreter's `programRunner`. The app passes one shared `WasmProgramRunner` to every session; without
+  a runner such files fail with status 126. `foo.wasm` in a `PATH` directory is also found as `foo`.
+* `WasmProgramRunner` parses the module with WasmKit 0.2.2 (an interpreter, no JIT; cached by path, size and
+  modification date), runs it on its own thread with a 16 MB stack and links the WASI host functions itself:
+  `fd_read`/`fd_write` on fds 0-2 go to the command's shell streams (so pipes and redirections work),
+  `poll_oneoff` clock subscriptions sleep on the cancellation token, every WASI call checks for Ctrl-C
+  (status 130), every intercepted memory access is bounds-checked, imports the runtime does not know (the
+  a-Shell `ashell_*` functions) are stubbed, and the a-Shell `AT_FDCWD` (-2) directory descriptor is mapped
+  to the `.` preopen. Preopens are `.`, `$HOME`, `$PREFIX` and `$TMPDIR` with identical guest and host paths.
+  Memory is limited to 1 GiB. Traps give status 134.
+* Layout (`PackageLayout`), with `$PREFIX` = `<app container>/Library/usr` (excluded from backup, not visible in Files):
+
+| Path | Contents |
+|---|---|
+| `$PREFIX/bin` | relative symlinks to package commands, first on `PATH` |
+| `$PREFIX/libexec/wasm/<package>/` | the `.wasm` files |
+| `$PREFIX/etc/pkg/sources.list` | index URLs, one per line |
+| `$PREFIX/var/lib/pkg/status.json` | installed packages |
+| `$PREFIX/var/lib/pkg/lists/` | downloaded indexes |
+| `$PREFIX/var/lib/pkg/lock` | `flock` lock held during update, install, remove and clean |
+| `$PREFIX/var/cache/pkg/archives/` | partial downloads |
+| `$PREFIX/tmp` | `$TMPDIR` |
+
+* Downloads are checked against the index `sha256` and `size`; any failure rolls back the files of the run and
+  leaves `status.json` unchanged. Without network and cached lists the index bundled with the app is used.
+* Limits: WebAssembly programs cannot start other programs, have no sockets and no threads, input is line based
+  (no raw-mode TUIs), they only see the preopened directories, they run 10-50 times slower than native code,
+  and Ctrl-C stops a program at its next WASI call but cannot interrupt a pure CPU loop.
 
 ### App (iOS, UIKit, iOS 15+)
 
@@ -193,7 +241,8 @@ public final class PTYProcessBackend: TerminalBackend {
 
 ```bash
 cd ios
-swift build && swift test          # Linux or macOS: core + shell
+swift build && swift test          # Linux or macOS: core + shell + WebAssembly runtime
+TERMUX_NETWORK_TESTS=1 swift test -c release --filter RealPackageTests   # downloads and runs the real packages
 cd App && xcodegen generate        # macOS only
 xcodebuild -project TermuxIOS.xcodeproj -scheme Termux -destination 'generic/platform=iOS Simulator' build
 ```

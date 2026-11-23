@@ -1,0 +1,17 @@
+name: Verify packages
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'packages/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify package index
+        run: python3 packages/verify_index.py packages/index.json

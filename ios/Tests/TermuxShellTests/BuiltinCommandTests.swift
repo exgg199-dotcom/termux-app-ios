@@ -191,12 +191,6 @@ final class BuiltinCommandTests: ShellTestCase {
         XCTAssertEqual(Hashing.hex(Hashing.md5(Array(long.utf8))), "cabe45dcc9ae5b66ba86600cca6b8ba8")
     }
 
-    func testPkgExplains() {
-        let r = run("pkg install python")
-        XCTAssertEqual(r.status, 1)
-        XCTAssertTrue(r.stderr.contains("not available on iOS"))
-    }
-
     func testHelpListsCommands() {
         let h = out("help")
         for c in ["ls", "grep", "sed", "curl", "exit"] { XCTAssertTrue(h.contains("  \(c) "), c) }

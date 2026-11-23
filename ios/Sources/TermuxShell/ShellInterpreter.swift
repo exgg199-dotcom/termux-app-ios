@@ -25,7 +25,10 @@ public final class ShellInterpreter {
     private var _exitRequested: Int32?
     private var _columns = 80
     private var _rows = 24
+    private var _programRunner: ProgramRunner?
     public let startDate = Date()
+
+    static let webAssemblyMagic: [UInt8] = [0x00, 0x61, 0x73, 0x6D]
 
     public init(homeDirectory: String, environment: [String: String] = [:], registry: CommandRegistry = .standard(),
                 history: ShellHistory? = nil) {
@@ -82,6 +85,8 @@ public final class ShellInterpreter {
     public var terminalColumns: Int { get { locked { _columns } } set { locked { _columns = max(1, newValue) } } }
     public var terminalRows: Int { get { locked { _rows } } set { locked { _rows = max(1, newValue) } } }
 
+    public var programRunner: ProgramRunner? { get { locked { _programRunner } } set { locked { _programRunner = newValue } } }
+
     public func subshell() -> ShellInterpreter {
         let child = ShellInterpreter(homeDirectory: homeDirectory, environment: environment, registry: registry, history: history)
         lock.lock()
@@ -91,6 +96,7 @@ public final class ShellInterpreter {
         child._positional = _positional
         child._columns = _columns
         child._rows = _rows
+        child._programRunner = _programRunner
         child.shellName = shellName
         lock.unlock()
         return child
@@ -183,8 +189,7 @@ public final class ShellInterpreter {
                 thread.stackSize = 4 << 20
                 thread.start()
             }
-            group.wait()
-            _ = pipes
+            withExtendedLifetime(pipes) { group.wait() }
             status = statuses.value[n - 1]
         }
         if pipeline.negated { status = status == 0 ? 1 : 0 }
@@ -242,7 +247,7 @@ public final class ShellInterpreter {
             return command.run(context)
         }
         if let script = findScript(name, environment: commandEnvironment) {
-            return runScript(script, argumentVector: argumentVector, streams: streams, cancellation: cancellation)
+            return runScript(script, argumentVector: argumentVector, streams: streams, cancellation: cancellation, environment: commandEnvironment)
         }
         if name.contains("/") {
             let full = ShellPath.resolve(name, relativeTo: currentDirectory)
@@ -266,24 +271,47 @@ public final class ShellInterpreter {
         }
         if name.contains("/") {
             let full = ShellPath.resolve(name, relativeTo: currentDirectory)
-            guard isUsable(full), let info = FileInfo(path: full, follow: true), info.isExecutable || name.hasSuffix(".sh") else { return nil }
+            guard isUsable(full), let info = FileInfo(path: full, follow: true),
+                  info.isExecutable || name.hasSuffix(".sh") || name.hasSuffix(".wasm") else { return nil }
             return full
         }
         let path = (overrides ?? environment)["PATH"] ?? ""
         for directory in path.split(separator: ":") {
-            let full = ShellPath.resolve(name, relativeTo: ShellPath.resolve(String(directory), relativeTo: currentDirectory))
+            let directoryPath = ShellPath.resolve(String(directory), relativeTo: currentDirectory)
+            let full = ShellPath.resolve(name, relativeTo: directoryPath)
             if isUsable(full) { return full }
+            let webAssemblyPath = ShellPath.resolve(name + ".wasm", relativeTo: directoryPath)
+            if isUsable(webAssemblyPath) { return webAssemblyPath }
         }
         return nil
     }
 
-    private func runScript(_ path: String, argumentVector: [String], streams: StandardStreams, cancellation: CancellationToken) -> Int32 {
+    private func runScript(_ path: String, argumentVector: [String], streams: StandardStreams, cancellation: CancellationToken,
+                           environment commandEnvironment: [String: String]) -> Int32 {
+        guard let handle = FileHandle(forReadingAtPath: path) else {
+            streams.stderr.writeLine("\(shellName): \(argumentVector[0]): Permission denied"); return 126
+        }
+        let header = [UInt8](handle.readData(ofLength: 4096))
+        handle.closeFile()
+        if header.starts(with: ShellInterpreter.webAssemblyMagic) {
+            guard let runner = programRunner else {
+                streams.stderr.writeLine("\(shellName): \(argumentVector[0]): cannot execute WebAssembly program: no WebAssembly runtime in this build")
+                return 126
+            }
+            let context = CommandContext(argumentVector: argumentVector, stdin: streams.stdin, stdout: streams.stdout, stderr: streams.stderr, shell: self,
+                                         cancellation: cancellation, environment: commandEnvironment, currentDirectory: currentDirectory)
+            return runner.run(programAt: path, context: context)
+        }
         guard let data = FileManager.default.contents(atPath: path) else {
             streams.stderr.writeLine("\(shellName): \(argumentVector[0]): Permission denied"); return 126
         }
         let bytes = [UInt8](data.prefix(4096))
         let isText = !bytes.contains(0) && String(validatingUTF8: bytes.map { CChar(bitPattern: $0) } + [0]) != nil
-        if bytes.starts(with: [0x7F, 0x45, 0x4C, 0x46]) || bytes.starts(with: [0xCF, 0xFA, 0xED, 0xFE]) || !isText {
+        if bytes.starts(with: [0x7F, 0x45, 0x4C, 0x46]) {
+            streams.stderr.writeLine("\(shellName): \(argumentVector[0]): cannot execute binary file: native Linux/Android programs cannot run on iOS (install WebAssembly packages with 'pkg install')")
+            return 126
+        }
+        if bytes.starts(with: [0xCF, 0xFA, 0xED, 0xFE]) || !isText {
             streams.stderr.writeLine("\(shellName): \(argumentVector[0]): cannot execute binary file (iOS does not allow running native executables)")
             return 126
         }
@@ -301,6 +329,7 @@ public final class ShellInterpreter {
             }
         }
         let child = subshell()
+        for (name, value) in commandEnvironment where child.variable(name) != value { child.setVariable(name, value) }
         child.positionalParameters = argumentVector
         let s = child.run(text, streams: streams, cancellation: cancellation)
         return child.exitRequested ?? s

@@ -63,6 +63,7 @@ public final class CommandRegistry {
         TextCommands.register(r)
         SystemCommands.register(r)
         NetworkCommands.register(r)
+        PackageCommands.register(r)
         return r
     }
 }
