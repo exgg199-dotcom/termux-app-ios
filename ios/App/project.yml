@@ -1,0 +1,112 @@
+name: TermuxIOS
+
+options:
+  bundleIdPrefix: com.nxteam
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  TermuxIOS:
+    path: ..
+
+targets:
+  Termux:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources
+      - path: Resources
+      - path: ../../packages/index.json
+        buildPhase: resources
+    dependencies:
+      - package: TermuxIOS
+        product: TermuxTerminal
+      - package: TermuxIOS
+        product: TermuxShell
+      - package: TermuxIOS
+        product: TermuxWasm
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Termux
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_NAME: Termux
+        PRODUCT_MODULE_NAME: Termux
+        PRODUCT_BUNDLE_IDENTIFIER: com.nxteam.termux.test
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MACCATALYST: NO
+
+  TermuxAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Tests/TermuxAppTests
+      - path: Sources/ExtraKeys/ExtraKeysConstants.swift
+      - path: Sources/ExtraKeys/ExtraKeysInfo.swift
+      - path: Sources/ExtraKeys/SpecialButton.swift
+      - path: Sources/TerminalView/KeyCodes.swift
+      - path: Sources/TerminalView/TerminalInput.swift
+      - path: Sources/TerminalView/TerminalMetrics.swift
+      - path: Sources/TerminalView/TerminalSelection.swift
+      - path: Sources/Settings/TermuxProperties.swift
+      - path: Sources/Settings/AppPreferences.swift
+      - path: Sources/App/Bootstrap.swift
+    dependencies:
+      - package: TermuxIOS
+        product: TermuxTerminal
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nxteam.termux.test.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Termux:
+    build:
+      targets:
+        Termux: all
+        TermuxAppTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - TermuxAppTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -1,0 +1,196 @@
+import XCTest
+@testable import TermuxTerminal
+
+final class ResizeTest: TerminalTestCase {
+
+	func testResizeWhenHasHistory() {
+		let cols = 3;
+		withTerminalSized(cols, 3).enterString("111222333444555666777888999").assertCursorAt(2, 2).assertLinesAre("777", "888", "999");
+		resize(cols, 5).assertCursorAt(4, 2).assertLinesAre("555", "666", "777", "888", "999");
+		resize(cols, 3).assertCursorAt(2, 2).assertLinesAre("777", "888", "999");
+	}
+
+	func testResizeWhenInAltBuffer() {
+		let rows = 3, cols = 3;
+		withTerminalSized(cols, rows).enterString("a\r\ndef$").assertLinesAre("a  ", "def", "$  ").assertCursorAt(2, 1);
+
+		resize(cols, 5).assertLinesAre("a  ", "def", "$  ", "   ", "   ").assertCursorAt(2, 1);
+		resize(cols, rows).assertLinesAre("a  ", "def", "$  ").assertCursorAt(2, 1);
+
+		enterString("\u{1B}[?1049h").assertLinesAre("   ", "   ", "   ").assertCursorAt(2, 1);
+		enterString("h").assertLinesAre("   ", "   ", " h ").assertCursorAt(2, 2);
+
+		resize(cols, 5).resize(cols, rows);
+
+		enterString("\u{1B}[?1049l").assertLinesAre("a  ", "def", "$  ").assertCursorAt(2, 1);
+	}
+
+	func testShrinkingInAltBuffer() {
+		let rows = 5;
+		let cols = 3;
+		withTerminalSized(cols, rows).enterString("A\r\nB\r\nC\r\nD\r\nE").assertLinesAre("A  ", "B  ", "C  ", "D  ", "E  ");
+		enterString("\u{1B}[?1049h").assertLinesAre("   ", "   ", "   ", "   ", "   ");
+		resize(3, 3).enterString("\u{1B}[?1049lF").assertLinesAre("C  ", "D  ", "EF ");
+	}
+
+	func testResizeAfterNewlineWhenInAltBuffer() {
+		let rows = 3;
+		let cols = 3;
+		withTerminalSized(cols, rows);
+		enterString("a\r\nb\r\nc\r\nd\r\ne\r\nf\r\n").assertLinesAre("e  ", "f  ", "   ").assertCursorAt(2, 0);
+		assertLineWraps(false, false, false);
+
+		enterString("\u{1B}[?1049h").assertLinesAre("   ", "   ", "   ").assertCursorAt(2, 0);
+		enterString("h").assertLinesAre("   ", "   ", "h  ").assertCursorAt(2, 1);
+
+		resize(cols, 5).assertLinesAre("   ", "   ", "h  ", "   ", "   ").assertCursorAt(2, 1);
+		resize(cols, rows).assertLinesAre("   ", "   ", "h  ").assertCursorAt(2, 1);
+
+		enterString("\u{1B}[?1049l").assertLinesAre("e  ", "f  ", "   ").assertCursorAt(2, 0);
+	}
+
+	func testResizeAfterHistoryWraparound() {
+		let rows = 3;
+		let cols = 10;
+		withTerminalSized(cols, rows);
+		for i in 0..<1000 {
+			let s = String(i);
+			enterString(s);
+			var buffer = s
+			while buffer.count < cols {
+				buffer += " "
+			}
+			if (i > rows) {
+				assertLineIs(rows - 1, buffer);
+			}
+			enterString("\r\n");
+		}
+		assertLinesAre("998       ", "999       ", "          ");
+		resize(cols, 2);
+		assertLinesAre("999       ", "          ");
+		resize(cols, 5);
+		assertLinesAre("996       ", "997       ", "998       ", "999       ", "          ");
+		resize(cols, rows);
+		assertLinesAre("998       ", "999       ", "          ");
+	}
+
+	func testVerticalResize() {
+		let rows = 5;
+		let cols = 3;
+
+		withTerminalSized(cols, rows);
+		enterString("\u{1B}[38;5;119m");
+		enterString("\u{1B}[48;5;129m");
+		enterString("\u{1B}[2J");
+		for r in 0..<rows {
+			for c in 0..<cols {
+				let style = getStyleAt(r, c);
+				assertEquals(119, TextStyle.decodeForeColor(style));
+				assertEquals(129, TextStyle.decodeBackColor(style));
+			}
+		}
+		enterString("11\r\n22");
+		assertLinesAre("11 ", "22 ", "   ", "   ", "   ").assertLineWraps(false, false, false, false, false);
+		resize(cols, rows - 2).assertLinesAre("11 ", "22 ", "   ");
+
+		for r in 0..<rows - 2 {
+			for c in 0..<cols {
+				let style = getStyleAt(r, c);
+				assertEquals(119, TextStyle.decodeForeColor(style));
+				assertEquals(129, TextStyle.decodeBackColor(style));
+			}
+		}
+
+		enterString("\u{1B}[48;5;200m");
+		resize(cols, rows);
+		for r in 0..<rows {
+			for c in 0..<cols {
+                let style = getStyleAt(r, c);
+				assertEquals(119, TextStyle.decodeForeColor(style));
+				assertEquals("wrong at row=" + r, r >= 3 ? 200 : 129, TextStyle.decodeBackColor(style));
+			}
+		}
+	}
+
+	func testHorizontalResize() {
+		let rows = 5;
+		let cols = 5;
+
+		withTerminalSized(cols, rows);
+		enterString("1111\r\n2222\r\n3333\r\n4444\r\n5555").assertCursorAt(4, 4);
+		assertLinesAre("1111 ", "2222 ", "3333 ", "4444 ", "5555 ").assertLineWraps(false, false, false, false, false);
+		resize(cols + 2, rows).assertLinesAre("1111   ", "2222   ", "3333   ", "4444   ", "5555   ").assertCursorAt(4, 4);
+		assertLineWraps(false, false, false, false, false);
+		resize(cols, rows).assertLinesAre("1111 ", "2222 ", "3333 ", "4444 ", "5555 ").assertCursorAt(4, 4);
+		assertLineWraps(false, false, false, false, false);
+		resize(cols - 1, rows).assertLinesAre("2222", "3333", "4444", "5555", "    ").assertCursorAt(4, 0);
+		assertLineWraps(false, false, false, true, false);
+		resize(cols - 2, rows).assertLinesAre("3  ", "444", "4  ", "555", "5  ").assertCursorAt(4, 1);
+		assertLineWraps(false, true, false, true, false);
+		resize(cols, rows).assertLinesAre("1111 ", "2222 ", "3333 ", "4444 ", "5555 ").assertCursorAt(4, 4);
+		assertLineWraps(false, false, false, false, false);
+	}
+
+	func testLineWrap() {
+		let rows = 3, cols = 5;
+		withTerminalSized(cols, rows).enterString("111111").assertLinesAre("11111", "1    ", "     ");
+		assertCursorAt(1, 1).assertLineWraps(true, false, false);
+
+		resize(7, rows).assertCursorAt(0, 6).assertLinesAre("111111 ", "       ", "       ").assertLineWraps(false, false, false);
+		resize(cols, rows).assertCursorAt(1, 1).assertLinesAre("11111", "1    ", "     ").assertLineWraps(true, false, false);
+
+		enterString("2").assertLinesAre("11111", "12   ", "     ").assertLineWraps(true, false, false);
+		enterString("123").assertLinesAre("11111", "12123", "     ").assertLineWraps(true, false, false);
+		enterString("W").assertLinesAre("11111", "12123", "W    ").assertLineWraps(true, true, false);
+
+		withTerminalSized(cols, rows).enterString("1234512345");
+		assertLinesAre("12345", "12345", "     ").assertLineWraps(true, false, false);
+		enterString("W").assertLinesAre("12345", "12345", "W    ").assertLineWraps(true, true, false);
+	}
+
+	func testCursorPositionWhenShrinking() {
+		let rows = 5, cols = 3;
+		withTerminalSized(cols, rows).enterString("$ ").assertLinesAre("$  ", "   ", "   ", "   ", "   ").assertCursorAt(0, 2);
+		resize(3, 3).assertLinesAre("$  ", "   ", "   ").assertCursorAt(0, 2);
+		resize(cols, rows).assertLinesAre("$  ", "   ", "   ", "   ", "   ").assertCursorAt(0, 2);
+	}
+
+	func testResizeWithCombiningCharInLastColumn() {
+		withTerminalSized(3, 3).enterString("ABC\u{302}DEF").assertLinesAre("ABC\u{302}", "DEF", "   ");
+		resize(4, 3).assertLinesAre("ABC\u{302}D", "EF  ", "    ");
+
+		withTerminalSized(3, 3).enterString("\u{1B}[37mA\u{1B}[35mB\u{1B}[33mC\u{302}\u{1B}[32mD\u{1B}[31mE\u{1B}[34mF").assertLinesAre("ABC\u{302}",
+				"DEF", "   ");
+		resize(4, 3).assertLinesAre("ABC\u{302}D", "EF  ", "    ");
+		assertForegroundIndices(effectLine(7, 5, 3, 2), effectLine(1, 4, 4, 4), effectLine(4, 4, 4, 4));
+	}
+
+	func testResizeWithLineWrappingContinuing() {
+		withTerminalSized(5, 3).enterString("\r\nAB DE").assertLinesAre("     ", "AB DE", "     ");
+		resize(4, 3).assertLinesAre("AB D", "E   ", "    ");
+		resize(3, 3).assertLinesAre("AB ", "DE ", "   ");
+		resize(5, 3).assertLinesAre("     ", "AB DE", "     ");
+	}
+
+	func testResizeWithWideChars() {
+		let rows = 3, cols = 4;
+		let twoCharsWidthOne = stringFromCodePoint(TerminalRowTest.TWO_JAVA_CHARS_DISPLAY_WIDTH_ONE_1);
+		withTerminalSized(cols, rows).enterString(twoCharsWidthOne).enterString("\r\n");
+		enterString(twoCharsWidthOne).assertLinesAre(twoCharsWidthOne + "   ", twoCharsWidthOne + "   ", "    ");
+		resize(3, 3).assertLinesAre(twoCharsWidthOne + "  ", twoCharsWidthOne + "  ", "   ");
+		enterString(twoCharsWidthOne).assertLinesAre(twoCharsWidthOne + "  ", twoCharsWidthOne + twoCharsWidthOne + " ", "   ");
+	}
+
+	func testResizeWithMoreWideChars() {
+		let rows = 4, cols = 5;
+
+		withTerminalSized(cols, rows).enterString("qqrr").assertLinesAre("qqrr ", "     ", "     ", "     ");
+		resize(2, rows).assertLinesAre("qq", "rr", "  ", "  ");
+		resize(5, rows).assertLinesAre("qqrr ", "     ", "     ", "     ");
+
+		withTerminalSized(cols, rows).enterString("ＱＲ").assertLinesAre("ＱＲ ", "     ", "     ", "     ");
+		resize(2, rows).assertLinesAre("Ｑ", "Ｒ", "  ", "  ");
+		resize(5, rows).assertLinesAre("ＱＲ ", "     ", "     ", "     ");
+	}
+
+}

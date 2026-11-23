@@ -1,0 +1,107 @@
+name: Build iOS
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios/App
+        run: xcodegen generate 2>&1 | tee ../../generate.log
+
+      - name: Resolve Swift packages
+        working-directory: ios/App
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project TermuxIOS.xcodeproj \
+            -scheme Termux \
+            -derivedDataPath build \
+            -skipPackagePluginValidation \
+            -skipMacroValidation 2>&1 | tee ../../resolve.log
+
+      - name: Build unsigned application
+        working-directory: ios/App
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project TermuxIOS.xcodeproj \
+            -scheme Termux \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee ../../build.log
+
+      - name: Package IPA
+        run: |
+          APPLICATION_PATH=$(find ios/App/build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          mkdir -p Payload
+          cp -R "$APPLICATION_PATH" Payload/
+          zip -qr Termux-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Termux-unsigned-ipa
+          path: Termux-unsigned.ipa
+
+      - name: Collect errors
+        if: failure()
+        run: |
+          {
+            echo "=== Errors ==="
+            grep -hE "error:|fatal error|Error:|BUILD FAILED|\*\* .* FAILED \*\*" generate.log resolve.log build.log 2>/dev/null | sort -u || true
+            echo
+            echo "=== Last lines of generate.log ==="
+            tail -n 50 generate.log 2>/dev/null || true
+            echo
+            echo "=== Last lines of resolve.log ==="
+            tail -n 50 resolve.log 2>/dev/null || true
+            echo
+            echo "=== Last lines of build.log ==="
+            tail -n 200 build.log 2>/dev/null || true
+          } > error.txt
+
+      - name: Upload errors
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-error
+          path: error.txt
+
+  test-linux:
+    runs-on: ubuntu-latest
+    container: swift:6.0.3-noble
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and test the Swift package
+        shell: bash
+        run: |
+          set -o pipefail
+          cd ios
+          swift build 2>&1 | tee ../linux.log
+          swift test 2>&1 | tee -a ../linux.log
+
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-error
+          path: linux.log

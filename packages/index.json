@@ -1,0 +1,176 @@
+{
+  "format": 1,
+  "name": "termux-ios-wasm",
+  "packages": [
+    {
+      "name": "quickjs",
+      "version": "0.18.0",
+      "architecture": "wasm32",
+      "description": "QuickJS-ng JavaScript engine (qjs)",
+      "homepage": "https://github.com/quickjs-ng/quickjs",
+      "license": "MIT",
+      "depends": [],
+      "provides": ["qjs"],
+      "files": [
+        {
+          "path": "libexec/wasm/quickjs/qjs.wasm",
+          "urls": ["https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-wasi.wasm"],
+          "sha256": "2c218412cb8b17e46ee91bea7556ec38f5b9b6bd6312fddd3ceeed14aa71eaaa",
+          "size": 1571399,
+          "mode": "0755"
+        }
+      ],
+      "commands": {"qjs": "libexec/wasm/quickjs/qjs.wasm"}
+    },
+    {
+      "name": "python",
+      "version": "3.12.0",
+      "architecture": "wasm32",
+      "description": "Python 3 programming language interpreter (WebAssembly build with the standard library embedded)",
+      "homepage": "https://github.com/vmware-labs/webassembly-language-runtimes",
+      "license": "PSF-2.0",
+      "depends": [],
+      "provides": ["python3"],
+      "files": [
+        {
+          "path": "libexec/wasm/python/python.wasm",
+          "urls": ["https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/python-3.12.0.wasm"],
+          "sha256": "e5dc5a398b07b54ea8fdb503bf68fb583d533f10ec3f930963e02b9505f7a763",
+          "size": 26267204,
+          "mode": "0755"
+        }
+      ],
+      "commands": {"python": "libexec/wasm/python/python.wasm", "python3": "libexec/wasm/python/python.wasm"},
+      "notes": "No network: pip cannot download packages. No subprocesses or threads. Startup takes a few seconds."
+    },
+    {
+      "name": "ruby",
+      "version": "3.2.2",
+      "architecture": "wasm32",
+      "description": "Ruby programming language interpreter (WebAssembly build)",
+      "homepage": "https://github.com/vmware-labs/webassembly-language-runtimes",
+      "license": "Ruby/BSD-2-Clause",
+      "depends": [],
+      "files": [
+        {
+          "path": "libexec/wasm/ruby/ruby.wasm",
+          "urls": ["https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/ruby%2F3.2.2%2B20230714-11be424/ruby-3.2.2.wasm"],
+          "sha256": "8b4abc0da1cfca2bc6d04c9b4e89ac6cd52340e020c3bf974fb6139b8195d8ac",
+          "size": 24470606,
+          "mode": "0755"
+        }
+      ],
+      "commands": {"ruby": "libexec/wasm/ruby/ruby.wasm"},
+      "notes": "No network: gem install cannot download gems. No subprocesses or threads. Startup takes a few seconds."
+    },
+    {
+      "name": "php",
+      "version": "8.2.6",
+      "architecture": "wasm32",
+      "description": "PHP scripting language (php-cgi WebAssembly build)",
+      "homepage": "https://github.com/vmware-labs/webassembly-language-runtimes",
+      "license": "PHP-3.01",
+      "depends": [],
+      "files": [
+        {
+          "path": "libexec/wasm/php/php-cgi.wasm",
+          "urls": ["https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/php%2F8.2.6%2B20230714-11be424/php-cgi-8.2.6.wasm"],
+          "sha256": "edb29de7cd80597292670499846db56929af1166459c4a776ef606aef357c93b",
+          "size": 13164411,
+          "mode": "0755"
+        }
+      ],
+      "commands": {"php-cgi": "libexec/wasm/php/php-cgi.wasm"},
+      "notes": "Only the php-cgi binary is available. No network or subprocesses."
+    },
+    {
+      "name": "xz-utils",
+      "version": "5.2",
+      "architecture": "wasm32",
+      "description": "XZ-format compression utilities (xz, unxz, xzcat, lzmadec)",
+      "homepage": "https://github.com/holzschu/a-Shell-commands",
+      "license": "0BSD/public domain/LGPL-2.1",
+      "depends": [],
+      "files": [
+        {
+          "path": "libexec/wasm/xz-utils/xz.wasm",
+          "urls": ["https://github.com/holzschu/a-Shell-commands/releases/download/0.1/xz.wasm"],
+          "sha256": "b3c7dc3ec1fe4e4370796c2f6e341d1da0edb99582ab15ce3229ce3575ef81df",
+          "size": 196301,
+          "mode": "0755"
+        },
+        {
+          "path": "libexec/wasm/xz-utils/lzmadec.wasm",
+          "urls": ["https://github.com/holzschu/a-Shell-commands/releases/download/0.1/lzmadec.wasm"],
+          "sha256": "77bf562bdbee30e4c019adaf3bd1d4931f14b952dfbc3e159ff069d121a63d45",
+          "size": 61872,
+          "mode": "0755"
+        }
+      ],
+      "commands": {
+        "xz": "libexec/wasm/xz-utils/xz.wasm",
+        "unxz": "libexec/wasm/xz-utils/xz.wasm",
+        "xzcat": "libexec/wasm/xz-utils/xz.wasm",
+        "lzmadec": "libexec/wasm/xz-utils/lzmadec.wasm"
+      }
+    },
+    {
+      "name": "unzip",
+      "version": "6.0",
+      "architecture": "wasm32",
+      "description": "De-archiver for .zip files",
+      "homepage": "https://github.com/holzschu/a-Shell-commands",
+      "license": "Info-ZIP",
+      "depends": [],
+      "files": [
+        {
+          "path": "libexec/wasm/unzip/unzip.wasm",
+          "urls": ["https://github.com/holzschu/a-Shell-commands/releases/download/0.1/unzip.wasm"],
+          "sha256": "eb864533fc3521c67f147eb911194a03c02b5e592465d41210e5dcb533eae33c",
+          "size": 196161,
+          "mode": "0755"
+        }
+      ],
+      "commands": {"unzip": "libexec/wasm/unzip/unzip.wasm"}
+    },
+    {
+      "name": "zip",
+      "version": "3.0",
+      "architecture": "wasm32",
+      "description": "Archiver for .zip files",
+      "homepage": "https://github.com/holzschu/a-Shell-commands",
+      "license": "Info-ZIP",
+      "depends": [],
+      "files": [
+        {
+          "path": "libexec/wasm/zip/zip.wasm",
+          "urls": ["https://github.com/holzschu/a-Shell-commands/releases/download/0.1/zip.wasm"],
+          "sha256": "f5fd0a5551e1dd4751ef2f2683b5cb140aa437378147538ed3d6f560183d3561",
+          "size": 262217,
+          "mode": "0755"
+        }
+      ],
+      "commands": {"zip": "libexec/wasm/zip/zip.wasm"}
+    },
+    {
+      "name": "sqlite",
+      "version": "3",
+      "architecture": "wasm32",
+      "description": "Command line interface for SQLite 3",
+      "homepage": "https://github.com/holzschu/a-Shell-commands",
+      "license": "public domain",
+      "depends": [],
+      "provides": ["sqlite3"],
+      "files": [
+        {
+          "path": "libexec/wasm/sqlite/sqlite3.wasm",
+          "urls": ["https://github.com/holzschu/a-Shell-commands/releases/download/0.1/sqlite3.wasm"],
+          "sha256": "8766845186c9977f68939097b2b60e7ae125230a09cfbff5322854c741d45aed",
+          "size": 926553,
+          "mode": "0755"
+        }
+      ],
+      "commands": {"sqlite3": "libexec/wasm/sqlite/sqlite3.wasm"}
+    }
+  ]
+}
